@@ -684,7 +684,9 @@ struct AgentActivityView: View {
     let notchHeight: CGFloat
 
     private var accent: Color { info.status == .ok ? .green : .red }
-    private var header: String { "\(info.toolDisplayName) finished" }
+    // Only ~80pt of width next to the physical notch, so the tool name alone —
+    // "Claude finished" truncates to "Claude fini…".
+    private var header: String { info.toolDisplayName }
     private var toolGlyph: String {
         switch info.tool.lowercased() {
         case "claude": return "sparkle"

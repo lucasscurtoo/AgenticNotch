@@ -26,10 +26,11 @@
 	<true/>
 	<key>SUEnableInstallerLauncherService</key>
 	<true/>
-	<key>SUFeedURL</key>
-	<string>https://TheBoredTeam.github.io/boring.notch/appcast.xml</string>
-	<key>SUPublicEDKey</key>
-	<string>B1Y47t8C/v8ImurYA+9arEsuCrpxwJSviekiflMElbI=</string>
+	<!-- No appcast for this fork yet: no SUFeedURL and no SUPublicEDKey, so Sparkle
+	     can never fetch or install an update. Keeping the upstream feed/key here
+	     would let the app replace itself with the upstream build. -->
+	<key>SUEnableJavaScriptReleaseNotes</key>
+	<false/>
 	<key>UTImportedTypeDeclarations</key>
 	<array>
 		<dict/>

@@ -53,3 +53,7 @@ build/
 *.xcarchive
 *.dSYM
 
+
+# Build output
+dist/
+*.dmg
