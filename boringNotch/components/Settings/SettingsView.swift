@@ -1835,19 +1835,19 @@ struct AgentsSettings: View {
                     .disabled(!soundEnabled)
             }
             Section {
-                Stepper("Esperar \(Int(debounce))s antes de avisar",
+                Stepper("Wait \(Int(debounce))s before notifying",
                         value: $debounce, in: 0...15)
                 Stepper("Auto-collapse after \(Int(autoCollapse))s",
                         value: $autoCollapse, in: 1...15)
             } header: {
                 Text("Timing")
             } footer: {
-                Text("La espera junta turnos seguidos: solo avisa cuando el agente estuvo quieto ese tiempo (evita una noti por turno).")
+                Text("Waiting groups back-to-back turns: it only notifies once the agent has been idle for that long (avoids one notification per turn).")
                     .font(.footnote).foregroundStyle(.secondary)
             }
-            Section("Recientes (últimos 10)") {
+            Section("Recent (last 10)") {
                 if history.isEmpty {
-                    Text("Sin actividad todavía.")
+                    Text("No activity yet.")
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(history) { rec in

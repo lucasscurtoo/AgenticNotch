@@ -455,7 +455,7 @@ final class AIQuotaManager: ObservableObject {
 
     private func fetchClaude() async -> ProviderQuota? {
         guard let token = claudeToken() else {
-            return ProviderQuota(provider: "Claude", windows: [], error: "Sin credenciales")
+            return ProviderQuota(provider: "Claude", windows: [], error: "No credentials")
         }
         var req = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -464,14 +464,14 @@ final class AIQuotaManager: ObservableObject {
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            if code == 401 { return ProviderQuota(provider: "Claude", windows: [], error: "Sesión expirada — reloguear") }
+            if code == 401 { return ProviderQuota(provider: "Claude", windows: [], error: "Session expired — log in again") }
             guard code == 200,
                   let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 return ProviderQuota(provider: "Claude", windows: [], error: "API error (\(code))")
             }
             return ProviderQuota(provider: "Claude", windows: parseClaudeWindows(json), error: nil)
         } catch {
-            return ProviderQuota(provider: "Claude", windows: [], error: "Sin red")
+            return ProviderQuota(provider: "Claude", windows: [], error: "No network")
         }
     }
 
@@ -518,7 +518,7 @@ final class AIQuotaManager: ObservableObject {
         }
         guard let tokens = json["tokens"] as? [String: Any],
               let token = tokens["access_token"] as? String, !token.isEmpty else {
-            return ProviderQuota(provider: "Codex", windows: [], error: "Sin token OAuth")
+            return ProviderQuota(provider: "Codex", windows: [], error: "No OAuth token")
         }
         var req = URLRequest(url: URL(string: "https://chatgpt.com/backend-api/wham/usage")!)
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -530,7 +530,7 @@ final class AIQuotaManager: ObservableObject {
         do {
             let (respData, resp) = try await URLSession.shared.data(for: req)
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            if code == 401 { return ProviderQuota(provider: "Codex", windows: [], error: "Sesión expirada — corré 'codex' para renovar") }
+            if code == 401 { return ProviderQuota(provider: "Codex", windows: [], error: "Session expired — run 'codex' to refresh") }
             guard code == 200,
                   let j = try JSONSerialization.jsonObject(with: respData) as? [String: Any],
                   let rate = j["rate_limit"] as? [String: Any] else {
@@ -549,7 +549,7 @@ final class AIQuotaManager: ObservableObject {
             }
             return ProviderQuota(provider: "Codex", windows: windows, error: nil)
         } catch {
-            return ProviderQuota(provider: "Codex", windows: [], error: "Sin red")
+            return ProviderQuota(provider: "Codex", windows: [], error: "No network")
         }
     }
 
