@@ -684,7 +684,7 @@ struct AgentActivityView: View {
     let notchHeight: CGFloat
 
     private var accent: Color { info.status == .ok ? .green : .red }
-    private var header: String { "\(info.toolDisplayName) terminó" }
+    private var header: String { "\(info.toolDisplayName) finished" }
     private var toolGlyph: String {
         switch info.tool.lowercased() {
         case "claude": return "sparkle"
@@ -721,6 +721,9 @@ struct AgentActivityView: View {
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.white)
                         .lineLimit(1)
+                        // The side next to the notch is narrow: shrink before truncating,
+                        // otherwise "Claude finished" renders as "Claude fini…".
+                        .minimumScaleFactor(0.75)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, 12)
@@ -770,7 +773,7 @@ struct AgentHistoryView: View {
                     Image(systemName: "sparkles")
                         .font(.title2)
                         .foregroundStyle(.gray)
-                    Text("Sin actividad de agentes todavía")
+                    Text("No agent activity yet")
                         .font(.callout)
                         .foregroundStyle(.gray)
                 }
@@ -819,7 +822,7 @@ struct AIQuotaView: View {
     var body: some View {
         VStack(spacing: 8) {
             HStack {
-                Text("Límites IA")
+                Text("AI limits")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white)
                 Spacer()
@@ -836,7 +839,7 @@ struct AIQuotaView: View {
             }
 
             if quota.providers.isEmpty {
-                Text(quota.isLoading ? "Cargando…" : "Sin datos")
+                Text(quota.isLoading ? "Loading…" : "No data")
                     .font(.callout)
                     .foregroundStyle(.gray)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
