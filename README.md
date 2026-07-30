@@ -11,10 +11,13 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/lucasscurtoo/AgenticNotch/releases/latest"><img src="https://img.shields.io/badge/Download-macOS%20DMG-black?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" /></a>
+  <a href="https://github.com/lucasscurtoo/AgenticNotch/releases/latest/download/AgenticNotch.dmg">
+    <img src="https://img.shields.io/badge/Download%20app%20for-macOS-black?style=for-the-badge&logo=apple&logoColor=white&labelColor=black" height="42" alt="Download app for macOS" />
+  </a>
 </p>
 
 <p align="center">
+  <a href="https://github.com/lucasscurtoo/AgenticNotch/releases/latest"><img src="https://img.shields.io/github/v/release/lucasscurtoo/AgenticNotch?label=latest&color=blue" alt="Latest release" /></a>
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue.svg" alt="License: GPL-3.0" />
   <img src="https://img.shields.io/badge/platform-macOS%2014%2B-black.svg" alt="macOS 14+" />
 </p>
@@ -44,8 +47,8 @@ the notch did before: music controls, calendar, file shelf and HUD replacement.
 
 ### Option 1 — download the DMG
 
-Grab the latest [**release**](https://github.com/lucasscurtoo/AgenticNotch/releases/latest),
-open the `.dmg` and drag **AgenticNotch** to `/Applications`.
+[**Download AgenticNotch.dmg**](https://github.com/lucasscurtoo/AgenticNotch/releases/latest/download/AgenticNotch.dmg)
+(always the latest release), open it and drag **AgenticNotch** to `/Applications`.
 
 > [!IMPORTANT]
 > The app is signed with a free Apple Development certificate, not notarized (that needs a

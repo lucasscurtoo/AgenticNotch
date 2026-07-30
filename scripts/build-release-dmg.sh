@@ -21,7 +21,10 @@ fi
 DD="${DERIVED_DATA:-build/dd}"
 APP="$DD/Build/Products/Release/AgenticNotch.app"
 VERSION="$(awk -F' = ' '/MARKETING_VERSION/ {gsub(/;/,"",$2); print $2; exit}' boringNotch.xcodeproj/project.pbxproj)"
-DMG="dist/AgenticNotch-$VERSION.dmg"
+# Unversioned name on purpose: the README's download button points at
+# releases/latest/download/AgenticNotch.dmg, which only resolves if every release
+# ships an asset with this exact name.
+DMG="dist/AgenticNotch.dmg"
 
 echo "==> Building (identity $IDENTITY, version $VERSION)"
 xcodebuild -project boringNotch.xcodeproj -scheme boringNotch -configuration Release \
@@ -51,3 +54,4 @@ rm -rf "$STAGE" "$ENT"
 echo "==> Done: $DMG"
 echo "    Install: open the DMG, drag to /Applications, then"
 echo "    xattr -dr com.apple.quarantine /Applications/AgenticNotch.app"
+echo "    Publish:  gh release create v$VERSION -R lucasscurtoo/AgenticNotch $DMG"
