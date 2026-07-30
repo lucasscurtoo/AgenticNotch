@@ -1,237 +1,129 @@
 <h1 align="center">
   <br>
-  <a href="http://theboring.name"><img src="https://framerusercontent.com/images/RFK4vs0kn8pRMuOO58JeyoemXA.png?scale-down-to=256" alt="AgenticNotch" width="150"></a>
+  <img src="Configuration/icon/agenticnotch-icon.png" alt="AgenticNotch" width="150">
   <br>
   AgenticNotch
   <br>
 </h1>
 
-
 <p align="center">
-  <a title="Crowdin" target="_blank" href="https://crowdin.com/project/boring-notch"><img src="https://badges.crowdin.net/boring-notch/localized.svg"></a>
-  <img src="https://github.com/TheBoredTeam/boring.notch/actions/workflows/cicd.yml/badge.svg" alt="TheBoringNotch Build & Test" style="margin-right: 10px;" />
-  <a href="https://discord.gg/c8JXA7qrPm">
-    <img src="https://dcbadge.limes.pink/api/server/https://discord.gg/c8JXA7qrPm?style=flat" alt="Discord Badge" />
-  </a>
-  <a href="https://www.ko-fi.com/alexander5015">
-    <img src="https://srv-cdn.himpfen.io/badges/kofi/kofi-flat.svg" alt="Ko-Fi" />
-  </a>
+  <em>Turn your MacBook's notch into a live monitor for your AI coding agents.</em>
 </p>
 
-<!--Welcome to **Boring.Notch**, the coolest way to make your MacBook's notch the star of the show! Forget about those boring status bars—our notch turns into a dynamic music control center, complete with a snazzy visualizer and all the music controls you need. It's like having a mini concert right at the top of your screen! -->
+<p align="center">
+  <a href="https://github.com/lucasscurtoo/AgenticNotch/releases/latest"><img src="https://img.shields.io/badge/Download-macOS%20DMG-black?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" /></a>
+</p>
 
-**AgenticNotch** is a fork of [TheBoringNotch](https://github.com/TheBoredTeam/boring.notch)
-that turns your MacBook's notch into a monitor for your AI coding agents: it pops a
-live activity (tool · status · project) and plays a chime whenever **Claude Code** or
-**Codex** finishes a turn, keeps a history of the last runs, and — like the original —
-still gives you the music control center, calendar, file shelf and HUD replacement.
+<p align="center">
+  <img src="https://img.shields.io/badge/license-GPL--3.0-blue.svg" alt="License: GPL-3.0" />
+  <img src="https://img.shields.io/badge/platform-macOS%2014%2B-black.svg" alt="macOS 14+" />
+</p>
 
-> **This is a community fork of [boring.notch](https://github.com/TheBoredTeam/boring.notch)**
-> (GPL-3.0). All the original credit goes to TheBoringTeam — AgenticNotch only adds a
-> few extra, AI-agent–focused features on top. If you want the pure music/notch app,
-> use the upstream project.
+<p align="center">
+  <img src="docs/demo.gif" alt="AgenticNotch demo" width="720" />
+</p>
 
-### What this fork adds
+**AgenticNotch** pops a card out of the notch — tool · summary · project · status — and
+plays a chime whenever **Claude Code** or **Codex** finishes a turn, so you can stop
+babysitting the terminal. It keeps a history of the last runs, and still does everything
+the notch did before: music controls, calendar, file shelf and HUD replacement.
+
+### Features
 
 - 🔔 **Agent-finished notifications** — when Claude Code or Codex ends a turn, the notch
   pops a card with a short summary of *what it did*, the project, and an ok/error status.
 - 🕑 **History** — the last 10 runs, in a dedicated notch tab and in Settings.
 - 📊 **AI limits tab** *(experimental)* — reads local Claude/Codex credentials to show
   session usage. Works only where those tokens are locally readable.
-- Everything from upstream boring.notch (music, calendar, shelf, HUD replacement…).
+- 🎧 **Everything else the notch already did** — music live activity, calendar, shelf with
+  AirDrop, HUD replacement for volume/brightness/backlight.
 
-See [AgenticNotch — agent notifications](#agenticnotch--agent-notifications) below to wire your agents.
+## Install
 
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/2d5f69c1-6e7b-4bc2-a6f1-bb9e27cf88a8" alt="Demo GIF" />
-</p>
+**Requirements:** macOS 14 Sonoma or later · Apple Silicon or Intel.
 
-<!--https://github.com/user-attachments/assets/19b87973-4b3a-4853-b532-7e82d1d6b040-->
----
-<!--## Table of Contents
-- [Installation](#installation)
-- [Usage](#usage)
-- [Roadmap](#-roadmap)
-- [Building from Source](#building-from-source)
-- [Contributing](#-contributing)
-- [Join our Discord Server](#join-our-discord-server)
-- [Star History](#star-history)
-- [Buy us a coffee!](#buy-us-a-coffee)
-- [Acknowledgments](#-acknowledgments)-->
+### Option 1 — download the DMG
 
-## Installation
-
-**System Requirements:**
-- macOS **14 Sonoma** or later
-- Apple Silicon or Intel Mac
-
----
-
-### Option 1: Download and Install Manually
-
-<a href="https://github.com/TheBoredTeam/boring.notch/releases/latest/download/boringNotch.dmg" target="_self"><img width="200" src="https://github.com/user-attachments/assets/e3179be1-8416-4b8a-b417-743e1ecc67d6" alt="Download for macOS" /></a>
-
-Once downloaded, open the `.dmg` and move **Boring Notch** to your `/Applications` folder.
+Grab the latest [**release**](https://github.com/lucasscurtoo/AgenticNotch/releases/latest),
+open the `.dmg` and drag **AgenticNotch** to `/Applications`.
 
 > [!IMPORTANT]
-> We don't have an Apple Developer account (yet 👀), so macOS will warn you that Boring Notch is from an unidentified developer on first launch. This is expected behavior.
+> The app is signed with a free Apple Development certificate, not notarized (that needs a
+> paid Apple Developer account), so macOS will refuse to open it on first launch. One
+> command, once:
 >
-> You'll need to bypass this before the app will open. You only need to do this once. Use one of the methods below.
+> ```bash
+> xattr -dr com.apple.quarantine /Applications/AgenticNotch.app
+> ```
+>
+> Then open it normally. Alternative without Terminal: **System Settings → Privacy &
+> Security → Open Anyway**, right after the first failed launch.
 
----
-
-#### Recommended: Terminal (Always Works)
-
-This is the quickest and easiest method. It only requires a single command and works consistently for all users. System Settings can sometimes fail and won't work for non-admin users.
-
-After moving Boring Notch to your Applications folder, run:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/boringNotch.app
-```
-
-Then open the app normally.
-
----
-
-#### Alternative: System Settings
-
-> [!NOTE]
-> This method doesn't work for all users. If this doesn't work, use the Terminal method above.
-
-1. Try to open the app — you'll see a security warning.
-2. Click **OK** to dismiss it.
-3. Open **System Settings** > **Privacy & Security**.
-4. Scroll to the bottom and click **Open Anyway** next to the Boring Notch warning.
-5. Confirm if prompted.
-
----
-
-### Option 2: Install via Homebrew
-
-You can also install using [Homebrew](https://brew.sh). The Homebrew installation automatically bypasses the macOS security warning described above.
+### Option 2 — build from source
 
 ```bash
-brew install --cask TheBoredTeam/boring-notch/boring-notch
+git clone https://github.com/lucasscurtoo/AgenticNotch.git
+cd AgenticNotch
+./scripts/build-release-dmg.sh     # builds, signs with your Apple Development cert, makes a DMG
 ```
 
-## AgenticNotch — agent notifications
+Or open `boringNotch.xcodeproj` in Xcode and hit **Run**. If you build a *Release* config
+from Xcode without setting your signing team, the app will crash at launch with
+`Library not loaded: @rpath/MediaRemoteAdapter.framework` — the bundled framework and the
+app end up with different Team IDs under hardened runtime. Set your team in **Signing &
+Capabilities**, or just use the script above.
 
-The notch reacts when a CLI AI agent finishes a turn (expands with the tool +
-status + project, and plays a chime). Configure under **Settings → Agents**.
+## Wiring your agents
 
-Wire your agents to the bundled script (use the absolute path to it):
+The notch reacts when a CLI agent finishes a turn. Configure the sound and behaviour under
+**Settings → Agents**, and point your agent at the bundled script (absolute path):
 
-**Claude Code** — add to `~/.claude/settings.json`:
+**Claude Code** — `~/.claude/settings.json`:
 ```json
 {
   "hooks": {
     "Stop": [
       { "hooks": [ { "type": "command",
-        "command": "/Users/globalcontact/Proyectos/AgenticNotch/scripts/agenticnotch-notify --tool claude --status ok" } ] }
+        "command": "/absolute/path/to/AgenticNotch/scripts/agenticnotch-notify --tool claude --status ok" } ] }
     ]
   }
 }
 ```
-`project` defaults to the basename of the hook's working directory.
+The summary is derived from the last assistant message; `project` defaults to the basename
+of the hook's working directory.
 
-**Codex** — add to `~/.codex/config.toml`:
+**Codex** — `~/.codex/config.toml`:
 ```toml
-notify = ["/Users/globalcontact/Proyectos/AgenticNotch/scripts/agenticnotch-notify", "--tool", "codex", "--status", "ok"]
+notify = ["/absolute/path/to/AgenticNotch/scripts/agenticnotch-notify", "--tool", "codex", "--status", "ok"]
 ```
 Codex appends a JSON event payload as a trailing argument; the script ignores it.
 
 ## Usage
 
-- Launch the app, and voilà—your notch is now the coolest part of your screen.
-- Hover over the notch to see it expand and reveal all its secrets.
-- Use the controls to manage your music like a rockstar.
-- Click the star in your menu bar to customize your notch to your heart's content.
+- Hover over the notch to expand it: music, calendar, shelf, agent history.
+- Click the icon in the menu bar to open Settings and customize everything.
 
 ## 📋 Roadmap
-- [x] Playback live activity 🎧
-- [x] Calendar integration 📆
-- [x] Reminders integration ☑️
-- [x] Mirror 📷
-- [x] Charging indicator and current percentage 🔋
-- [x] Customizable gesture control 👆🏻
-- [x] Shelf functionality with AirDrop 📚
-- [x] Notch sizing customization, finetuning on different display sizes 🖥️
-- [x] System HUD replacements (volume, brightness, backlight) 🎚️💡⌨️
-- [ ] Bluetooth Live Activity (connect/disconnect for bluetooth devices) 
-- [ ] Weather integration ⛅️
-- [ ] Customizable Layout options 🛠️
-- [ ] Lock Screen Widgets 🔒
-- [ ] Extension system 🧩
-- [ ] Notifications (under consideration) 🔔
-<!-- - [ ] Clipboard history manager 📌 `Extension` -->
-<!-- - [ ] Download indicator of different browsers (Safari, Chromium browsers, Firefox) 🌍 `Extension`-->
-<!-- - [ ] Customizable function buttons 🎛️ -->
-<!-- - [ ] App switcher 🪄 -->
 
-<!-- ## 🧩 Extensions
-> [!NOTE]
-> We’re hard at work on some awesome extensions! Stay tuned, and we’ll keep you updated as soon as they’re released. -->
-
-## Building from Source
-
-### Prerequisites
-
-- **macOS 15.6 or later**
-- **Xcode 26 or later**
-
-### Installation
-
-1. **Clone the Repository**:
-   ```bash
-   git clone https://github.com/TheBoredTeam/boring.notch.git
-   cd boring.notch
-   ```
-
-2. **Open the Project in Xcode**:
-   ```bash
-   open boringNotch.xcodeproj
-   ```
-
-3. **Build and Run**:
-    - Click the "Run" button or press `Cmd + R`. Watch the magic unfold!
+- [x] Agent-finished notifications for Claude Code and Codex 🔔
+- [x] Run history 🕑
+- [ ] Per-project filters and mute rules 🔕
+- [ ] More agents (Gemini CLI, Cursor, Aider) 🤖
+- [ ] Live "agent is working" state, not just finished 🔄
+- [ ] Own appcast so the app can auto-update ⬆️
 
 ## 🤝 Contributing
 
-We’re all about good vibes and awesome contributions! Read [CONTRIBUTING.md](CONTRIBUTING.md) to learn how you can join the fun!
+Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Join our Discord Server
+## 🎉 Credits
 
-<a href="https://discord.gg/GvYcYpAKTu" target="_blank"><img src="https://iili.io/28m3GHv.png" alt="Join The Boring Server!" style="height: 60px !important;width: 217px !important;" ></a>
+AgenticNotch is a fork of **[boring.notch](https://github.com/TheBoredTeam/boring.notch)**
+by [TheBoringTeam](https://github.com/TheBoredTeam) (GPL-3.0) — the music, calendar, shelf
+and HUD features are their work; this fork adds the AI-agent layer on top. Go star the
+original: [Discord](https://discord.gg/GvYcYpAKTu) · [Ko-fi](https://www.ko-fi.com/alexander5015).
 
-## Star History
-
-<a href="https://www.star-history.com/#TheBoredTeam/boring.notch&Timeline">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=TheBoredTeam/boring.notch&type=Timeline&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=TheBoredTeam/boring.notch&type=Timeline" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=TheBoredTeam/boring.notch&type=Timeline" />
- </picture>
-</a>
-
-## Support us on Ko-fi!
-<!-- <a href="https://www.buymeacoffee.com/jfxh67wvfxq" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-red.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a> -->
-<a href="https://www.ko-fi.com/alexander5015" target="_blank"><img src="https://github.com/user-attachments/assets//a76175ef-7e93-475a-8b67-4922ba5964c2" alt="Support us on Ko-fi" style="height: 70px !important;width: 346px !important;" ></a>
-
-## 🎉 Acknowledgments
-
-We would like to express our gratitude to the authors and maintainers of the open-source projects that made this possible. 
-
-## Notable Projects
-- **[MediaRemoteAdapter](https://github.com/ungive/mediaremote-adapter)** –  An open-source project that allowed us to use the Now Playing source in macOS 15.4+
-- **[NotchDrop](https://github.com/Lakr233/NotchDrop)** – An open-source project that has been instrumental in developing the first version of the "Shelf" feature in Boring Notch.
-
-For a full list of licenses and attributions, please see the [Third-Party Licenses](./THIRD_PARTY_LICENSES.md) file.
-
-### Icon credits: [@maxtron95](https://github.com/maxtron95)
-### Website credits: [@himanshhhhuv](https://github.com/himanshhhhuv)
-
-- **SwiftUI**: For making us look like coding wizards.
-- **You**: For being awesome and checking out **boring.notch**!
-
-
+Also built on **[MediaRemoteAdapter](https://github.com/ungive/mediaremote-adapter)** (Now
+Playing on macOS 15.4+) and **[NotchDrop](https://github.com/Lakr233/NotchDrop)** (basis for
+the Shelf). Original icon by [@maxtron95](https://github.com/maxtron95).
+Full attributions: [Third-Party Licenses](./THIRD_PARTY_LICENSES).
