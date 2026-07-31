@@ -296,6 +296,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         #if DEBUG
         AgentActivityInfo.runSelfCheck()
+        AIQuotaManager.runSelfCheck()
         #endif
 
         NotificationCenter.default.addObserver(

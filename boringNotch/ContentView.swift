@@ -822,24 +822,9 @@ struct AIQuotaView: View {
     @ObservedObject var quota = AIQuotaManager.shared
 
     var body: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Text("AI limits")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-                Spacer()
-                if quota.isLoading {
-                    ProgressView().controlSize(.small)
-                }
-                Button {
-                    Task { await quota.refresh() }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.gray)
-            }
-
+        // No title row: the tab icon already says what this is, and every point of
+        // height here is one the provider cards need.
+        VStack(spacing: 5) {
             if quota.providers.isEmpty {
                 Text(quota.isLoading ? "Loading…" : "No data")
                     .font(.callout)
@@ -847,12 +832,19 @@ struct AIQuotaView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    VStack(spacing: 10) {
+                    VStack(spacing: 6) {
                         ForEach(quota.providers) { p in
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(p.provider)
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(.white)
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 6) {
+                                    Text(p.provider)
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(.white)
+                                    if let measured = p.measuredAt {
+                                        Text("as of \(measured.formatted(date: .omitted, time: .shortened))")
+                                            .font(.system(size: 9))
+                                            .foregroundStyle(.gray.opacity(0.7))
+                                    }
+                                }
                                 if let e = p.error {
                                     Text(e).font(.caption).foregroundStyle(.orange)
                                 } else if p.windows.isEmpty {
@@ -862,8 +854,9 @@ struct AIQuotaView: View {
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(8)
-                            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
                         }
                     }
                     .padding(.horizontal, 2)
@@ -872,6 +865,20 @@ struct AIQuotaView: View {
         }
         .padding(.horizontal, 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(alignment: .topTrailing) {
+            Group {
+                if quota.isLoading {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button { Task { await quota.refresh() } } label: {
+                        Image(systemName: "arrow.clockwise").font(.system(size: 10))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.gray)
+                }
+            }
+            .padding(.trailing, 8)
+        }
         .task {
             if quota.providers.isEmpty { await quota.refresh() }
         }
@@ -883,12 +890,22 @@ struct QuotaBar: View {
     private var pct: Double { max(0, min(100, window.usedPercent)) }
     private var color: Color { pct >= 90 ? .red : (pct >= 70 ? .orange : .green) }
 
+    // Two lines per window, not three: the notch is ~190pt tall and both providers
+    // have to fit without scrolling.
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack {
+            HStack(spacing: 6) {
                 Text(window.label).font(.system(size: 10)).foregroundStyle(.gray)
+                if let reset = window.resetAt {
+                    // Ticks every minute so the countdown doesn't freeze while the tab is open.
+                    TimelineView(.periodic(from: .now, by: 60)) { _ in
+                        Text(Self.resetText(reset))
+                            .font(.system(size: 9))
+                            .foregroundStyle(.gray.opacity(0.6))
+                    }
+                }
                 Spacer()
-                Text("\(Int(pct))% usado").font(.system(size: 10, weight: .medium)).foregroundStyle(.white)
+                Text("\(Int(pct))%").font(.system(size: 10, weight: .semibold)).foregroundStyle(.white)
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
@@ -896,12 +913,18 @@ struct QuotaBar: View {
                     Capsule().fill(color).frame(width: geo.size.width * pct / 100)
                 }
             }
-            .frame(height: 5)
-            if let reset = window.resetAt {
-                Text("reset \(reset.formatted(.relative(presentation: .named)))")
-                    .font(.system(size: 8))
-                    .foregroundStyle(.gray.opacity(0.7))
-            }
+            .frame(height: 4)
         }
+    }
+
+    /// "· resets in 3h 12m", counting down to the window's reset.
+    static func resetText(_ date: Date) -> String {
+        let remaining = date.timeIntervalSinceNow
+        guard remaining > 0 else { return "· resetting now" }
+        let totalMinutes = Int(remaining) / 60
+        let hours = totalMinutes / 60
+        if hours >= 24 { return "· resets in \(hours / 24)d \(hours % 24)h" }
+        if hours > 0 { return "· resets in \(hours)h \(totalMinutes % 60)m" }
+        return "· resets in \(max(1, totalMinutes))m"
     }
 }

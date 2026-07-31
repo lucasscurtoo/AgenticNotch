@@ -428,6 +428,9 @@ struct ProviderQuota: Identifiable {
     let provider: String       // "Claude", "Codex"
     var windows: [QuotaWindow]
     var error: String?
+    /// When the numbers were measured. Nil means "just fetched from the API";
+    /// a date means they come from a cache written by the CLI itself.
+    var measuredAt: Date?
 }
 
 /// Reads local Claude/Codex credentials and queries their usage endpoints.
@@ -453,10 +456,60 @@ final class AIQuotaManager: ObservableObject {
 
     // MARK: Claude
 
+    /// Claude Code caches the numbers it shows in `/usage` inside ~/.claude.json, so
+    /// that is the first stop: no token, no network, and it is what the CLI displays.
+    /// The OAuth endpoint is only tried when the cache isn't there — reading the token
+    /// costs a keychain prompt, and subscription accounts don't always store one.
     private func fetchClaude() async -> ProviderQuota? {
+        if let cached = claudeCachedUsage() { return cached }
         guard let token = claudeToken() else {
-            return ProviderQuota(provider: "Claude", windows: [], error: "No credentials")
+            return ProviderQuota(provider: "Claude", windows: [],
+                                 error: "No usage data — run Claude Code once")
         }
+        return await fetchClaudeLive(token: token)
+    }
+
+    private func claudeCachedUsage() -> ProviderQuota? {
+        let path = ("~/.claude.json" as NSString).expandingTildeInPath
+        guard let data = FileManager.default.contents(atPath: path),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let cache = root["cachedUsageUtilization"] as? [String: Any],
+              let utilization = cache["utilization"] as? [String: Any]
+        else { return nil }
+
+        let measuredAt = (cache["fetchedAtMs"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) }
+        var windows = parseClaudeLimits(utilization)
+        if windows.isEmpty { windows = parseClaudeWindows(utilization) }
+        guard !windows.isEmpty else { return nil }
+        return ProviderQuota(provider: "Claude", windows: windows, error: nil, measuredAt: measuredAt)
+    }
+
+    /// The `limits` array is the CLI's own model: one entry per window, including
+    /// per-model weekly caps that the flat five_hour/seven_day keys don't carry.
+    private func parseClaudeLimits(_ utilization: [String: Any]) -> [QuotaWindow] {
+        guard let limits = utilization["limits"] as? [[String: Any]] else { return [] }
+        return limits.compactMap { entry in
+            guard let percent = numeric(entry["percent"]) else { return nil }
+            let kind = entry["kind"] as? String ?? ""
+            let model = ((entry["scope"] as? [String: Any])?["model"] as? [String: Any])?["display_name"] as? String
+            let label: String
+            switch kind {
+            case "session":       label = "Session (5h)"
+            case "weekly_all":    label = "Weekly"
+            case "weekly_scoped": label = model.map { "Weekly · \($0)" } ?? "Weekly (scoped)"
+            default:              label = kind.replacingOccurrences(of: "_", with: " ").capitalized
+            }
+            // A scoped window with nothing used and no reset is a limit that never engaged.
+            if kind == "weekly_scoped", percent == 0, entry["resets_at"] is NSNull || entry["resets_at"] == nil {
+                return nil
+            }
+            return QuotaWindow(label: label,
+                               usedPercent: percent,
+                               resetAt: isoDate(entry["resets_at"]))
+        }
+    }
+
+    private func fetchClaudeLive(token: String) async -> ProviderQuota? {
         var req = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
@@ -476,24 +529,43 @@ final class AIQuotaManager: ObservableObject {
     }
 
     private func parseClaudeWindows(_ json: [String: Any]) -> [QuotaWindow] {
-        let labels = ["five_hour": "5h", "seven_day": "7d",
-                      "seven_day_opus": "7d Opus", "seven_day_sonnet": "7d Sonnet"]
+        let labels = ["five_hour": "Session (5h)", "seven_day": "Weekly",
+                      "seven_day_opus": "Weekly · Opus", "seven_day_sonnet": "Weekly · Sonnet"]
         var out: [QuotaWindow] = []
         for (key, value) in json {
             guard let dict = value as? [String: Any] else { continue }
-            guard let util = (dict["utilization"] as? Double) ?? (dict["utilization"] as? NSNumber)?.doubleValue
-            else { continue }
-            let reset = (dict["resets_at"] as? Double) ?? (dict["reset_at"] as? Double)
+            guard let util = numeric(dict["utilization"]) else { continue }
             out.append(QuotaWindow(label: labels[key] ?? key.replacingOccurrences(of: "_", with: " "),
                                    usedPercent: util,
-                                   resetAt: reset.map { Date(timeIntervalSince1970: $0) }))
+                                   resetAt: isoDate(dict["resets_at"]) ?? isoDate(dict["reset_at"])))
         }
-        let order = ["5h", "7d", "7d Sonnet", "7d Opus"]
+        let order = Array(labels.values)
         return out.sorted { (order.firstIndex(of: $0.label) ?? 99) < (order.firstIndex(of: $1.label) ?? 99) }
     }
 
+    private func numeric(_ value: Any?) -> Double? {
+        (value as? Double) ?? (value as? NSNumber)?.doubleValue
+    }
+
+    /// Reset stamps arrive as epoch seconds from the API and as ISO-8601 with
+    /// fractional seconds from the CLI cache.
+    private func isoDate(_ value: Any?) -> Date? {
+        if let seconds = numeric(value) { return Date(timeIntervalSince1970: seconds) }
+        guard let text = value as? String else { return nil }
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = parser.date(from: text) { return date }
+        parser.formatOptions = [.withInternetDateTime]
+        return parser.date(from: text)
+    }
+
     private func claudeToken() -> String? {
-        if let json = keychainJSON(service: "Claude Code-credentials"), let t = oauthAccessToken(json) { return t }
+        // Claude Code keys the keychain per account: "Claude Code-credentials" and
+        // "Claude Code-credentials-<hash>". Checking only the bare name misses
+        // every machine with more than one login.
+        for service in claudeKeychainServices() {
+            if let json = keychainJSON(service: service), let t = oauthAccessToken(json) { return t }
+        }
         let path = ("~/.claude/.credentials.json" as NSString).expandingTildeInPath
         if let data = FileManager.default.contents(atPath: path),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -537,7 +609,7 @@ final class AIQuotaManager: ObservableObject {
                 return ProviderQuota(provider: "Codex", windows: [], error: "API error (\(code))")
             }
             var windows: [QuotaWindow] = []
-            for (key, fallback) in [("primary_window", "5h"), ("secondary_window", "7d")] {
+            for (key, fallback) in [("primary_window", "Session (5h)"), ("secondary_window", "Weekly")] {
                 guard let w = rate[key] as? [String: Any],
                       let used = (w["used_percent"] as? Double) ?? (w["used_percent"] as? NSNumber)?.doubleValue
                 else { continue }
@@ -556,13 +628,61 @@ final class AIQuotaManager: ObservableObject {
     private func codexLabel(_ secs: Double?) -> String? {
         guard let s = secs else { return nil }
         switch Int(s) {
-        case 18000:  return "5h"
-        case 604800: return "7d"
-        default:     return "\(Int(s / 3600))h"
+        case 18000:  return "Session (5h)"
+        case 604800: return "Weekly"
+        default:     return "\(Int(s / 3600))h window"
         }
     }
 
+    #if DEBUG
+    /// Parses a sample of the real ~/.claude.json cache shape.
+    static func runSelfCheck() {
+        let sample: [String: Any] = [
+            "limits": [
+                ["kind": "session", "percent": 18, "resets_at": "2026-07-31T06:20:00.432008+00:00"],
+                ["kind": "weekly_all", "percent": 48, "resets_at": "2026-08-01T00:00:00.432029+00:00"],
+                ["kind": "weekly_scoped", "percent": 0, "resets_at": NSNull(),
+                 "scope": ["model": ["display_name": "Fable"]]],
+            ]
+        ]
+        let windows = shared.parseClaudeLimits(sample)
+        assert(windows.count == 2, "the scoped window with nothing used should be dropped")
+        assert(windows[0].label == "Session (5h)" && windows[0].usedPercent == 18)
+        assert(windows[1].label == "Weekly" && windows[1].resetAt != nil, "6-digit fractional seconds must parse")
+
+        let flat: [String: Any] = ["five_hour": ["utilization": 12, "resets_at": 1785466356.0]]
+        assert(shared.parseClaudeWindows(flat).first?.usedPercent == 12)
+
+        // And against whatever this machine's Claude Code wrote, so a shape change is visible.
+        if let live = shared.claudeCachedUsage() {
+            for w in live.windows {
+                FileHandle.standardError.write("[quota] \(w.label): \(Int(w.usedPercent))% resets \(w.resetAt.map(String.init(describing:)) ?? "—")\n".data(using: .utf8)!)
+            }
+        } else {
+            FileHandle.standardError.write("[quota] no cached usage in ~/.claude.json\n".data(using: .utf8)!)
+        }
+    }
+    #endif
+
     // MARK: Keychain
+
+    /// Names of the keychain entries Claude Code may have written, most specific last.
+    /// Only attributes are requested here, which never triggers an unlock prompt —
+    /// the prompt (if any) comes when the matching entry's data is read.
+    private func claudeKeychainServices() -> [String] {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll
+        ]
+        var items: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &items) == errSecSuccess,
+              let attributes = items as? [[String: Any]] else { return ["Claude Code-credentials"] }
+        let services = attributes
+            .compactMap { $0[kSecAttrService as String] as? String }
+            .filter { $0.hasPrefix("Claude Code-credentials") }
+        return services.isEmpty ? ["Claude Code-credentials"] : services.sorted()
+    }
 
     private func keychainJSON(service: String) -> [String: Any]? {
         let query: [String: Any] = [

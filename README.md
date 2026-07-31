@@ -36,8 +36,9 @@ the notch did before: music controls, calendar, file shelf and HUD replacement.
 - 🔔 **Agent-finished notifications** — when Claude Code or Codex ends a turn, the notch
   pops a card with a short summary of *what it did*, the project, and an ok/error status.
 - 🕑 **History** — the last 10 runs, in a dedicated notch tab and in Settings.
-- 📊 **AI limits tab** *(experimental)* — reads local Claude/Codex credentials to show
-  session usage. Works only where those tokens are locally readable.
+- 📊 **AI limits tab** — how much of your Claude and Codex quota is gone and when each
+  window resets. Claude comes from the usage cache Claude Code writes to `~/.claude.json`
+  (no token, no network); Codex from its own usage endpoint using `~/.codex/auth.json`.
 - 🎧 **Everything else the notch already did** — music live activity, calendar, shelf with
   AirDrop, HUD replacement for volume/brightness/backlight.
 
