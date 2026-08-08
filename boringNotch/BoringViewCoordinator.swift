@@ -59,6 +59,147 @@ struct AgentActivityInfo: Equatable {
     #endif
 }
 
+// MARK: - Focus activity (Engram pomodoro mirror)
+
+enum FocusPhaseKind: String {
+    case focusing, shortBreak, longBreak, paused, idle
+
+    var symbol: String {
+        switch self {
+        case .focusing:   return "brain.head.profile"
+        case .shortBreak: return "cup.and.saucer"
+        case .longBreak:  return "figure.walk"
+        case .paused:     return "pause.circle"
+        case .idle:       return "timer"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .focusing:   return "Focus"
+        case .shortBreak: return "Short break"
+        case .longBreak:  return "Long break"
+        case .paused:     return "Paused"
+        case .idle:       return "Idle"
+        }
+    }
+}
+
+/// Payload decoded from an `agenticnotch://focus?...` URL, pushed by Engram
+/// (~/Proyectos/Engram) on every focus-session phase transition.
+///
+/// Display only: the notch never controls the session and never notifies for it.
+/// Engram sends an absolute `endsAt` instead of ticking, so everything here is a
+/// pure function of the payload and `now`.
+struct FocusActivityInfo: Equatable {
+    var phase: FocusPhaseKind
+    /// When the running phase ends. Nil while paused and in open-ended deep work.
+    var endsAt: Date?
+    /// Frozen remainder, sent only while paused.
+    var frozenRemaining: TimeInterval?
+    /// Full length of the current phase; nil when open-ended. Drives the ring.
+    var duration: TimeInterval?
+    var blocks: Int
+    var cycles: Int?
+    var label: String
+    /// Local arrival time — what an open-ended block counts up from.
+    var receivedAt: Date
+
+    static func from(url: URL, now: Date = Date()) -> FocusActivityInfo? {
+        guard url.scheme == "agenticnotch", url.host == "focus" else { return nil }
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        func q(_ name: String) -> String? {
+            items.first(where: { $0.name == name })?.value.flatMap { $0.isEmpty ? nil : $0 }
+        }
+        guard let phase = FocusPhaseKind(rawValue: q("phase") ?? "") else { return nil }
+        return FocusActivityInfo(
+            phase: phase,
+            endsAt: q("endsAt").flatMap(Double.init).map { Date(timeIntervalSince1970: $0) },
+            frozenRemaining: q("remaining").flatMap(Double.init),
+            duration: q("duration").flatMap(Double.init),
+            blocks: q("blocks").flatMap(Int.init) ?? 0,
+            cycles: q("cycles").flatMap(Int.init),
+            label: q("label") ?? phase.title,
+            receivedAt: now
+        )
+    }
+
+    /// Deep work never ends on its own, so its block counts up instead of down.
+    var isOpenEnded: Bool { endsAt == nil && frozenRemaining == nil }
+
+    /// Seconds left, or nil when the block is open-ended.
+    func remaining(at now: Date) -> TimeInterval? {
+        if let frozenRemaining { return max(0, frozenRemaining) }
+        guard let endsAt else { return nil }
+        return max(0, endsAt.timeIntervalSince(now))
+    }
+
+    /// 0...1 through the current phase; nil without a duration.
+    func progress(at now: Date) -> Double? {
+        guard let duration, duration > 0, let remaining = remaining(at: now) else { return nil }
+        return min(1, max(0, 1 - remaining / duration))
+    }
+
+    /// Countdown, or elapsed time for an open-ended block.
+    func clockText(at now: Date) -> String {
+        let seconds = remaining(at: now) ?? now.timeIntervalSince(receivedAt)
+        let total = Int(max(0, seconds.rounded()))
+        return total >= 3_600
+            ? String(format: "%d:%02d:%02d", total / 3_600, (total % 3_600) / 60, total % 60)
+            : String(format: "%02d:%02d", total / 60, total % 60)
+    }
+
+    /// True once Engram has clearly stopped talking. A live Engram pushes the next
+    /// phase within a second of the boundary, so 90 s past it means the app was
+    /// killed mid-session and the countdown would otherwise sit at 00:00 forever.
+    ///
+    /// Only timed phases can go stale: a pause or a deep-work block is legitimately
+    /// open-ended, and Engram clears those explicitly when it quits.
+    func isStale(at now: Date) -> Bool {
+        guard let endsAt else { return false }
+        return now.timeIntervalSince(endsAt) > 90
+    }
+}
+
+extension FocusActivityInfo {
+    #if DEBUG
+    static func runSelfCheck() {
+        let now = Date(timeIntervalSince1970: 1_735_732_800)
+        let endsAt = now.addingTimeInterval(1_200)
+
+        let running = from(
+            url: URL(string: "agenticnotch://focus?phase=focusing&endsAt=\(Int(endsAt.timeIntervalSince1970))&duration=1500&blocks=2&cycles=4&label=Focus")!,
+            now: now
+        )
+        assert(running?.phase == .focusing)
+        assert(running?.remaining(at: now) == 1_200)
+        assert(running?.progress(at: now) == 0.2)          // 300 of 1500 elapsed
+        assert(running?.clockText(at: now) == "20:00")
+        assert(running?.cycles == 4 && running?.blocks == 2)
+        assert(running?.isStale(at: now) == false)
+        assert(running?.isStale(at: endsAt.addingTimeInterval(91)) == true)
+
+        let paused = from(url: URL(string: "agenticnotch://focus?phase=paused&remaining=871&duration=1500")!, now: now)
+        assert(paused?.remaining(at: now.addingTimeInterval(600)) == 871, "paused time must not drain")
+        assert(paused?.isStale(at: now.addingTimeInterval(86_400)) == false, "a pause may last all day")
+
+        let open = from(url: URL(string: "agenticnotch://focus?phase=focusing&label=Deep%20work")!, now: now)
+        assert(open?.isOpenEnded == true)
+        assert(open?.remaining(at: now) == nil)
+        assert(open?.progress(at: now) == nil)
+        assert(open?.label == "Deep work")
+
+        assert(from(url: URL(string: "agenticnotch://focus?phase=idle")!)?.phase == .idle)
+        assert(from(url: URL(string: "agenticnotch://focus")!) == nil)              // no phase
+        assert(from(url: URL(string: "agenticnotch://focus?phase=sleeping")!) == nil) // unknown phase
+        assert(from(url: URL(string: "agenticnotch://done?tool=claude")!) == nil)   // wrong host
+        assert(from(url: URL(string: "https://example.com?phase=focusing")!) == nil) // wrong scheme
+        assert(AgentActivityInfo.from(url: URL(string: "agenticnotch://focus?phase=focusing")!) == nil,
+               "the two hosts must not shadow each other")
+    }
+    #endif
+}
+
 enum SneakContentType {
     case brightness
     case volume
@@ -406,6 +547,24 @@ class BoringViewCoordinator: ObservableObject {
         history.insert(AgentActivityRecord(info: info, date: Date()), at: 0)
         if history.count > 10 { history = Array(history.prefix(10)) }
         Defaults[.agentHistory] = history
+    }
+
+    // MARK: - Focus activity (Engram pomodoro mirror)
+
+    /// Persistent by design: unlike `agentActivity` there is no auto-collapse task.
+    /// It lives until Engram says `idle` or the payload goes stale.
+    @Published var focusActivity: FocusActivityInfo?
+
+    func showFocusActivity(_ info: FocusActivityInfo) {
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.74)) {
+            focusActivity = info.phase == .idle ? nil : info
+        }
+    }
+
+    /// Driven by the views' own 1 s timeline — no timer of our own.
+    func clearFocusActivityIfStale(at now: Date) {
+        guard let focusActivity, focusActivity.isStale(at: now) else { return }
+        withAnimation(.smooth) { self.focusActivity = nil }
     }
 }
 

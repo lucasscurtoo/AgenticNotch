@@ -72,15 +72,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
 
-    // AgenticNotch: route agenticnotch://done URLs to the notch live activity.
+    // AgenticNotch: route agenticnotch:// URLs — `done` to the agent live activity,
+    // `focus` to the Engram pomodoro mirror.
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
-            guard let info = AgentActivityInfo.from(url: url) else {
+            if let info = AgentActivityInfo.from(url: url) {
+                Task { @MainActor in
+                    BoringViewCoordinator.shared.showAgentActivity(info)
+                }
+            } else if let focus = FocusActivityInfo.from(url: url) {
+                Task { @MainActor in
+                    BoringViewCoordinator.shared.showFocusActivity(focus)
+                }
+            } else {
                 NSLog("AgenticNotch: ignored URL \(url.absoluteString)")
-                continue
-            }
-            Task { @MainActor in
-                BoringViewCoordinator.shared.showAgentActivity(info)
             }
         }
     }
@@ -296,6 +301,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         #if DEBUG
         AgentActivityInfo.runSelfCheck()
+        FocusActivityInfo.runSelfCheck()
         AIQuotaManager.runSelfCheck()
         #endif
 
