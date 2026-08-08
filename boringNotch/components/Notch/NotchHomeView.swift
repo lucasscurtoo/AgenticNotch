@@ -443,12 +443,15 @@ struct NotchHomeView: View {
         HStack(alignment: .top, spacing: (shouldShowCamera && Defaults[.showCalendar]) ? 10 : 15) {
             MusicPlayerView(albumArtNamespace: albumArtNamespace)
 
+            // While a focus session is running it takes the calendar's slot instead of
+            // sitting beside it — the notch is a fixed 640pt wide, and stacking both
+            // rigid panels squeezes the flexible music/camera views unreadably. The
+            // collapsed notch already resolves the same conflict this way (see
+            // ContentView's FocusLiveActivity vs MusicLiveActivity precedence).
             if let focus = coordinator.focusActivity {
                 FocusPanelView(info: focus)
                     .transition(.opacity)
-            }
-
-            if Defaults[.showCalendar] {
+            } else if Defaults[.showCalendar] {
                 CalendarView()
                     .frame(width: shouldShowCamera ? 170 : 215)
                     .onHover { isHovering in
