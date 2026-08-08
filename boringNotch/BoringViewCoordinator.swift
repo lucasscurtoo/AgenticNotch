@@ -105,20 +105,34 @@ struct FocusActivityInfo: Equatable {
     /// Local arrival time — what an open-ended block counts up from.
     var receivedAt: Date
 
+    /// Anything past this is not a plausible second count or epoch (year ~2096).
+    /// `agenticnotch://` is registered and unauthenticated, so out-of-range numbers
+    /// are dropped where they enter rather than trapping later in `Int(_:)`.
+    private static let sanityBound: Double = 4_000_000_000
+    /// Engram's own picker stops at 12; the notch must not take its word for it,
+    /// because `cycles` drives an eager `ForEach`.
+    private static let maxCycles = 12
+
     static func from(url: URL, now: Date = Date()) -> FocusActivityInfo? {
         guard url.scheme == "agenticnotch", url.host == "focus" else { return nil }
         let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func q(_ name: String) -> String? {
             items.first(where: { $0.name == name })?.value.flatMap { $0.isEmpty ? nil : $0 }
         }
+        /// `Double("inf")`, `"nan"` and `"1e400"` all parse; none of them may survive.
+        func number(_ name: String) -> Double? {
+            guard let value = q(name).flatMap(Double.init),
+                  value.isFinite, abs(value) <= sanityBound else { return nil }
+            return value
+        }
         guard let phase = FocusPhaseKind(rawValue: q("phase") ?? "") else { return nil }
         return FocusActivityInfo(
             phase: phase,
-            endsAt: q("endsAt").flatMap(Double.init).map { Date(timeIntervalSince1970: $0) },
-            frozenRemaining: q("remaining").flatMap(Double.init),
-            duration: q("duration").flatMap(Double.init),
+            endsAt: number("endsAt").map { Date(timeIntervalSince1970: $0) },
+            frozenRemaining: number("remaining"),
+            duration: number("duration"),
             blocks: q("blocks").flatMap(Int.init) ?? 0,
-            cycles: q("cycles").flatMap(Int.init),
+            cycles: q("cycles").flatMap(Int.init).map { min(max(0, $0), maxCycles) },
             label: q("label") ?? phase.title,
             receivedAt: now
         )
@@ -177,6 +191,7 @@ extension FocusActivityInfo {
         assert(running?.clockText(at: now) == "20:00")
         assert(running?.cycles == 4 && running?.blocks == 2)
         assert(running?.isStale(at: now) == false)
+        assert(running?.isStale(at: endsAt.addingTimeInterval(90)) == false, "90 s is the boundary, not past it")
         assert(running?.isStale(at: endsAt.addingTimeInterval(91)) == true)
 
         let paused = from(url: URL(string: "agenticnotch://focus?phase=paused&remaining=871&duration=1500")!, now: now)
@@ -188,6 +203,18 @@ extension FocusActivityInfo {
         assert(open?.remaining(at: now) == nil)
         assert(open?.progress(at: now) == nil)
         assert(open?.label == "Deep work")
+
+        // Out-of-range numbers reach Int(_:) in clockText and would trap there.
+        assert(from(url: URL(string: "agenticnotch://focus?phase=focusing&endsAt=inf")!)?.endsAt == nil)
+        assert(from(url: URL(string: "agenticnotch://focus?phase=focusing&endsAt=nan")!)?.endsAt == nil)
+        assert(from(url: URL(string: "agenticnotch://focus?phase=focusing&endsAt=1e400")!)?.endsAt == nil)
+        assert(from(url: URL(string: "agenticnotch://focus?phase=paused&remaining=1e30")!)?.frozenRemaining == nil)
+        assert(from(url: URL(string: "agenticnotch://focus?phase=focusing&endsAt=inf")!, now: now)?
+            .clockText(at: now) == "00:00")
+        // An unbounded cycle count would materialize that many Circles in an HStack.
+        assert(from(url: URL(string: "agenticnotch://focus?phase=focusing&cycles=100000000")!)?.cycles == 12)
+        assert(from(url: URL(string: "agenticnotch://focus?phase=focusing&cycles=-3")!)?.cycles == 0)
+        assert(from(url: URL(string: "agenticnotch://focus?phase=focusing&cycles=4")!)?.cycles == 4)
 
         assert(from(url: URL(string: "agenticnotch://focus?phase=idle")!)?.phase == .idle)
         assert(from(url: URL(string: "agenticnotch://focus")!) == nil)              // no phase
