@@ -443,6 +443,11 @@ struct NotchHomeView: View {
         HStack(alignment: .top, spacing: (shouldShowCamera && Defaults[.showCalendar]) ? 10 : 15) {
             MusicPlayerView(albumArtNamespace: albumArtNamespace)
 
+            if let focus = coordinator.focusActivity {
+                FocusPanelView(info: focus)
+                    .transition(.opacity)
+            }
+
             if Defaults[.showCalendar] {
                 CalendarView()
                     .frame(width: shouldShowCamera ? 170 : 215)
@@ -463,6 +468,69 @@ struct NotchHomeView: View {
         }
         .transition(.asymmetric(insertion: .opacity.combined(with: .move(edge: .top)), removal: .opacity))
         .blur(radius: vm.notchState == .closed ? 30 : 0)
+    }
+}
+
+/// Expanded-notch face of the Engram focus session. Display only — Engram owns
+/// start, pause and stop, so nothing here is tappable.
+struct FocusPanelView: View {
+    let info: FocusActivityInfo
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let now = context.date
+            VStack(spacing: 8) {
+                ZStack {
+                    Circle()
+                        .stroke(Color.gray.opacity(0.25), lineWidth: 5)
+                    if let progress = info.progress(at: now) {
+                        Circle()
+                            .trim(from: 0, to: progress)
+                            .stroke(phaseColor, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                    }
+                    Text(info.clockText(at: now))
+                        .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white)
+                }
+                .frame(width: 76, height: 76)
+
+                HStack(spacing: 5) {
+                    Image(systemName: info.phase.symbol)
+                    Text(info.label)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .font(.caption)
+                .foregroundStyle(.gray)
+
+                if let cycles = info.cycles, cycles > 1 {
+                    HStack(spacing: 5) {
+                        ForEach(0 ..< cycles, id: \.self) { index in
+                            Circle()
+                                .fill(index < filledDots(of: cycles) ? phaseColor : Color.gray.opacity(0.3))
+                                .frame(width: 6, height: 6)
+                        }
+                    }
+                }
+            }
+            .frame(width: 118)
+            .padding(.vertical, 5)
+        }
+    }
+
+    /// A long break shows the round it just earned, fully filled — the same rule
+    /// Engram's own timer uses.
+    private func filledDots(of cycles: Int) -> Int {
+        info.phase == .longBreak ? cycles : info.blocks % cycles
+    }
+
+    private var phaseColor: Color {
+        switch info.phase {
+        case .focusing: return .effectiveAccent
+        case .shortBreak, .longBreak: return .green
+        case .paused, .idle: return .gray
+        }
     }
 }
 
