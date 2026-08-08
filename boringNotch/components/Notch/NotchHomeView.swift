@@ -477,6 +477,7 @@ struct NotchHomeView: View {
 /// Expanded-notch face of the Engram focus session. Display only — Engram owns
 /// start, pause and stop, so nothing here is tappable.
 struct FocusPanelView: View {
+    @ObservedObject var coordinator = BoringViewCoordinator.shared
     let info: FocusActivityInfo
 
     var body: some View {
@@ -519,6 +520,11 @@ struct FocusPanelView: View {
             }
             .frame(width: 118)
             .padding(.vertical, 5)
+            // The collapsed face is not on screen while the notch is open, so its
+            // copy of this check is not running. Whichever face is visible owns it.
+            .onChange(of: context.date) { _, date in
+                coordinator.clearFocusActivityIfStale(at: date)
+            }
         }
     }
 

@@ -180,10 +180,12 @@ struct FocusActivityInfo: Equatable {
     /// phase within a second of the boundary, so 90 s past it means the app was
     /// killed mid-session and the countdown would otherwise sit at 00:00 forever.
     ///
-    /// Only timed phases can go stale: a pause or a deep-work block is legitimately
-    /// open-ended, and Engram clears those explicitly when it quits.
+    /// A pause or a deep-work block has no end to run past, so it gets a far longer
+    /// ceiling on arrival instead: long enough never to interrupt a real all-day
+    /// pause, short enough that a SIGKILLed Engram does not leave a frozen pill the
+    /// user has no control to dismiss.
     func isStale(at now: Date) -> Bool {
-        guard let endsAt else { return false }
+        guard let endsAt else { return now.timeIntervalSince(receivedAt) > 12 * 3_600 }
         return now.timeIntervalSince(endsAt) > 90
     }
 }
@@ -210,7 +212,8 @@ extension FocusActivityInfo {
         let paused = from(url: URL(string: "agenticnotch://focus?phase=paused&remaining=871&duration=1500")!, now: now)
         assert(paused?.remaining(at: now.addingTimeInterval(600)) == 871, "paused time must not drain")
         assert(paused?.isOpenEnded == false, "a pause is frozen, never open-ended")
-        assert(paused?.isStale(at: now.addingTimeInterval(86_400)) == false, "a pause may last all day")
+        assert(paused?.isStale(at: now.addingTimeInterval(11 * 3_600)) == false, "a pause may last all day")
+        assert(paused?.isStale(at: now.addingTimeInterval(13 * 3_600)) == true, "but not past the ceiling")
 
         let open = from(url: URL(string: "agenticnotch://focus?phase=focusing&elapsed=1930&label=Deep%20work")!, now: now)
         assert(open?.isOpenEnded == true)
@@ -220,6 +223,7 @@ extension FocusActivityInfo {
         // Counts up from Engram's total, not from the moment the URL landed.
         assert(open?.clockText(at: now) == "32:10")
         assert(open?.clockText(at: now.addingTimeInterval(50)) == "33:00")
+        assert(open?.isStale(at: now.addingTimeInterval(13 * 3_600)) == true, "a killed Engram must not linger")
 
         let pausedOpen = from(url: URL(string: "agenticnotch://focus?phase=paused&elapsed=1930&label=Paused")!, now: now)
         assert(pausedOpen?.isOpenEnded == false)
