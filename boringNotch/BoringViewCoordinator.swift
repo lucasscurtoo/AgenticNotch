@@ -173,7 +173,7 @@ extension FocusActivityInfo {
         )
         assert(running?.phase == .focusing)
         assert(running?.remaining(at: now) == 1_200)
-        assert(running?.progress(at: now) == 0.2)          // 300 of 1500 elapsed
+        assert(abs((running?.progress(at: now) ?? -1) - 0.2) < 0.0001) // 300 of 1500 elapsed
         assert(running?.clockText(at: now) == "20:00")
         assert(running?.cycles == 4 && running?.blocks == 2)
         assert(running?.isStale(at: now) == false)
