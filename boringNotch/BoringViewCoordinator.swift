@@ -59,6 +59,200 @@ struct AgentActivityInfo: Equatable {
     #endif
 }
 
+// MARK: - Focus activity (Engram pomodoro mirror)
+
+enum FocusPhaseKind: String {
+    case focusing, shortBreak, longBreak, paused, idle
+
+    var symbol: String {
+        switch self {
+        case .focusing:   return "brain.head.profile"
+        case .shortBreak: return "cup.and.saucer"
+        case .longBreak:  return "figure.walk"
+        case .paused:     return "pause.circle"
+        case .idle:       return "timer"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .focusing:   return "Focus"
+        case .shortBreak: return "Short break"
+        case .longBreak:  return "Long break"
+        case .paused:     return "Paused"
+        case .idle:       return "Idle"
+        }
+    }
+}
+
+/// Payload decoded from an `agenticnotch://focus?...` URL, pushed by Engram
+/// (~/Proyectos/Engram) on every focus-session phase transition.
+///
+/// Display only: the notch never controls the session and never notifies for it.
+/// Engram sends an absolute `endsAt` instead of ticking, so everything here is a
+/// pure function of the payload and `now`.
+struct FocusActivityInfo: Equatable {
+    var phase: FocusPhaseKind
+    /// When the running phase ends. Nil while paused and in open-ended deep work.
+    var endsAt: Date?
+    /// Frozen remainder, sent only while paused.
+    var frozenRemaining: TimeInterval?
+    /// Full length of the current phase; nil when open-ended. Drives the ring.
+    var duration: TimeInterval?
+    var blocks: Int
+    var cycles: Int?
+    var label: String
+    /// Seconds already elapsed when the payload was built, sent instead of `endsAt`
+    /// for an open-ended block. Engram's own session total, so the two agree.
+    var elapsed: TimeInterval?
+    /// Local arrival time — the origin an open-ended block counts up from.
+    var receivedAt: Date
+
+    /// Anything past this is not a plausible second count or epoch (year ~2096).
+    /// `agenticnotch://` is registered and unauthenticated, so out-of-range numbers
+    /// are dropped where they enter rather than trapping later in `Int(_:)`.
+    private static let sanityBound: Double = 4_000_000_000
+    /// Engram's own picker stops at 12; the notch must not take its word for it,
+    /// because `cycles` drives an eager `ForEach`.
+    private static let maxCycles = 12
+
+    static func from(url: URL, now: Date = Date()) -> FocusActivityInfo? {
+        guard url.scheme == "agenticnotch", url.host == "focus" else { return nil }
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        func q(_ name: String) -> String? {
+            items.first(where: { $0.name == name })?.value.flatMap { $0.isEmpty ? nil : $0 }
+        }
+        /// `Double("inf")`, `"nan"` and `"1e400"` all parse; none of them may survive.
+        func number(_ name: String) -> Double? {
+            guard let value = q(name).flatMap(Double.init),
+                  value.isFinite, abs(value) <= sanityBound else { return nil }
+            return value
+        }
+        guard let phase = FocusPhaseKind(rawValue: q("phase") ?? "") else { return nil }
+        return FocusActivityInfo(
+            phase: phase,
+            endsAt: number("endsAt").map { Date(timeIntervalSince1970: $0) },
+            frozenRemaining: number("remaining"),
+            duration: number("duration"),
+            blocks: q("blocks").flatMap(Int.init) ?? 0,
+            cycles: q("cycles").flatMap(Int.init).map { min(max(0, $0), maxCycles) },
+            label: q("label") ?? phase.title,
+            elapsed: number("elapsed"),
+            receivedAt: now
+        )
+    }
+
+    /// Deep work never ends on its own, so its block counts up instead of down.
+    /// A paused block is never open-ended even without an end date — it is frozen.
+    var isOpenEnded: Bool { phase != .paused && endsAt == nil && frozenRemaining == nil }
+
+    /// Seconds left, or nil when there is no end to count down to.
+    func remaining(at now: Date) -> TimeInterval? {
+        if let frozenRemaining { return max(0, frozenRemaining) }
+        guard let endsAt else { return nil }
+        return max(0, endsAt.timeIntervalSince(now))
+    }
+
+    /// Seconds spent, for a block with no end date. `receivedAt` alone would restart
+    /// the count on every push and disagree with Engram after a pause, so it is only
+    /// the delta on top of the total Engram sent — and while paused, not even that.
+    func elapsedSeconds(at now: Date) -> TimeInterval {
+        let sent = max(0, elapsed ?? 0)
+        return isOpenEnded ? sent + max(0, now.timeIntervalSince(receivedAt)) : sent
+    }
+
+    /// 0...1 through the current phase; nil without a duration.
+    func progress(at now: Date) -> Double? {
+        guard let duration, duration > 0, let remaining = remaining(at: now) else { return nil }
+        return min(1, max(0, 1 - remaining / duration))
+    }
+
+    /// Countdown, or elapsed time when there is nothing to count down to.
+    func clockText(at now: Date) -> String {
+        let seconds = remaining(at: now) ?? elapsedSeconds(at: now)
+        let total = Int(max(0, seconds.rounded()))
+        return total >= 3_600
+            ? String(format: "%d:%02d:%02d", total / 3_600, (total % 3_600) / 60, total % 60)
+            : String(format: "%02d:%02d", total / 60, total % 60)
+    }
+
+    /// True once Engram has clearly stopped talking. A live Engram pushes the next
+    /// phase within a second of the boundary, so 90 s past it means the app was
+    /// killed mid-session and the countdown would otherwise sit at 00:00 forever.
+    ///
+    /// A pause or a deep-work block has no end to run past, so it gets a far longer
+    /// ceiling on arrival instead: long enough never to interrupt a real all-day
+    /// pause, short enough that a SIGKILLed Engram does not leave a frozen pill the
+    /// user has no control to dismiss.
+    func isStale(at now: Date) -> Bool {
+        guard let endsAt else { return now.timeIntervalSince(receivedAt) > 12 * 3_600 }
+        return now.timeIntervalSince(endsAt) > 90
+    }
+}
+
+extension FocusActivityInfo {
+    #if DEBUG
+    static func runSelfCheck() {
+        let now = Date(timeIntervalSince1970: 1_735_732_800)
+        let endsAt = now.addingTimeInterval(1_200)
+
+        let running = from(
+            url: URL(string: "agenticnotch://focus?phase=focusing&endsAt=\(Int(endsAt.timeIntervalSince1970))&duration=1500&blocks=2&cycles=4&label=Focus")!,
+            now: now
+        )
+        assert(running?.phase == .focusing)
+        assert(running?.remaining(at: now) == 1_200)
+        assert(abs((running?.progress(at: now) ?? -1) - 0.2) < 0.0001) // 300 of 1500 elapsed
+        assert(running?.clockText(at: now) == "20:00")
+        assert(running?.cycles == 4 && running?.blocks == 2)
+        assert(running?.isStale(at: now) == false)
+        assert(running?.isStale(at: endsAt.addingTimeInterval(90)) == false, "90 s is the boundary, not past it")
+        assert(running?.isStale(at: endsAt.addingTimeInterval(91)) == true)
+
+        let paused = from(url: URL(string: "agenticnotch://focus?phase=paused&remaining=871&duration=1500")!, now: now)
+        assert(paused?.remaining(at: now.addingTimeInterval(600)) == 871, "paused time must not drain")
+        assert(paused?.isOpenEnded == false, "a pause is frozen, never open-ended")
+        assert(paused?.isStale(at: now.addingTimeInterval(11 * 3_600)) == false, "a pause may last all day")
+        assert(paused?.isStale(at: now.addingTimeInterval(13 * 3_600)) == true, "but not past the ceiling")
+
+        let open = from(url: URL(string: "agenticnotch://focus?phase=focusing&elapsed=1930&label=Deep%20work")!, now: now)
+        assert(open?.isOpenEnded == true)
+        assert(open?.remaining(at: now) == nil)
+        assert(open?.progress(at: now) == nil)
+        assert(open?.label == "Deep work")
+        // Counts up from Engram's total, not from the moment the URL landed.
+        assert(open?.clockText(at: now) == "32:10")
+        assert(open?.clockText(at: now.addingTimeInterval(50)) == "33:00")
+        assert(open?.isStale(at: now.addingTimeInterval(13 * 3_600)) == true, "a killed Engram must not linger")
+
+        let pausedOpen = from(url: URL(string: "agenticnotch://focus?phase=paused&elapsed=1930&label=Paused")!, now: now)
+        assert(pausedOpen?.isOpenEnded == false)
+        assert(pausedOpen?.clockText(at: now.addingTimeInterval(600)) == "32:10",
+               "a paused deep-work block must not tick up")
+
+        // Out-of-range numbers reach Int(_:) in clockText and would trap there.
+        assert(from(url: URL(string: "agenticnotch://focus?phase=focusing&endsAt=inf")!)?.endsAt == nil)
+        assert(from(url: URL(string: "agenticnotch://focus?phase=focusing&endsAt=nan")!)?.endsAt == nil)
+        assert(from(url: URL(string: "agenticnotch://focus?phase=focusing&endsAt=1e400")!)?.endsAt == nil)
+        assert(from(url: URL(string: "agenticnotch://focus?phase=paused&remaining=1e30")!)?.frozenRemaining == nil)
+        assert(from(url: URL(string: "agenticnotch://focus?phase=focusing&endsAt=inf")!, now: now)?
+            .clockText(at: now) == "00:00")
+        // An unbounded cycle count would materialize that many Circles in an HStack.
+        assert(from(url: URL(string: "agenticnotch://focus?phase=focusing&cycles=100000000")!)?.cycles == 12)
+        assert(from(url: URL(string: "agenticnotch://focus?phase=focusing&cycles=-3")!)?.cycles == 0)
+        assert(from(url: URL(string: "agenticnotch://focus?phase=focusing&cycles=4")!)?.cycles == 4)
+
+        assert(from(url: URL(string: "agenticnotch://focus?phase=idle")!)?.phase == .idle)
+        assert(from(url: URL(string: "agenticnotch://focus")!) == nil)              // no phase
+        assert(from(url: URL(string: "agenticnotch://focus?phase=sleeping")!) == nil) // unknown phase
+        assert(from(url: URL(string: "agenticnotch://done?tool=claude")!) == nil)   // wrong host
+        assert(from(url: URL(string: "https://example.com?phase=focusing")!) == nil) // wrong scheme
+        assert(AgentActivityInfo.from(url: URL(string: "agenticnotch://focus?phase=focusing")!) == nil,
+               "the two hosts must not shadow each other")
+    }
+    #endif
+}
+
 enum SneakContentType {
     case brightness
     case volume
@@ -406,6 +600,24 @@ class BoringViewCoordinator: ObservableObject {
         history.insert(AgentActivityRecord(info: info, date: Date()), at: 0)
         if history.count > 10 { history = Array(history.prefix(10)) }
         Defaults[.agentHistory] = history
+    }
+
+    // MARK: - Focus activity (Engram pomodoro mirror)
+
+    /// Persistent by design: unlike `agentActivity` there is no auto-collapse task.
+    /// It lives until Engram says `idle` or the payload goes stale.
+    @Published var focusActivity: FocusActivityInfo?
+
+    func showFocusActivity(_ info: FocusActivityInfo) {
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.74)) {
+            focusActivity = info.phase == .idle ? nil : info
+        }
+    }
+
+    /// Driven by the views' own 1 s timeline — no timer of our own.
+    func clearFocusActivityIfStale(at now: Date) {
+        guard let focusActivity, focusActivity.isStale(at: now) else { return }
+        withAnimation(.smooth) { self.focusActivity = nil }
     }
 }
 

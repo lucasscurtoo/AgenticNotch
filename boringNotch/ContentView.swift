@@ -67,6 +67,10 @@ struct ContentView: View {
             && vm.notchState == .closed && Defaults[.showPowerStatusNotifications]
         {
             chinWidth = 640
+        } else if coordinator.focusActivity != nil && vm.notchState == .closed
+            && !vm.hideOnClosed
+        {
+            chinWidth += (max(0, vm.effectiveClosedNotchHeight - 12) + focusClockWidth + 20)
         } else if (!coordinator.expandingView.show || coordinator.expandingView.type == .music)
             && vm.notchState == .closed && (musicManager.isPlaying || !musicManager.isPlayerIdle)
             && coordinator.musicLiveActivityEnabled && !vm.hideOnClosed
@@ -296,6 +300,9 @@ struct ContentView: View {
                       } else if coordinator.sneakPeek.show && Defaults[.inlineHUD] && (coordinator.sneakPeek.type != .music) && (coordinator.sneakPeek.type != .battery) && vm.notchState == .closed {
                           InlineHUD(type: $coordinator.sneakPeek.type, value: $coordinator.sneakPeek.value, icon: $coordinator.sneakPeek.icon, hoverAnimation: $isHovering, gestureProgress: $gestureProgress)
                               .transition(.opacity)
+                      } else if let focus = coordinator.focusActivity, vm.notchState == .closed, !vm.hideOnClosed {
+                          FocusLiveActivity(focus)
+                              .transition(.opacity)
                       } else if (!coordinator.expandingView.show || coordinator.expandingView.type == .music) && vm.notchState == .closed && (musicManager.isPlaying || !musicManager.isPlayerIdle) && coordinator.musicLiveActivityEnabled && !vm.hideOnClosed {
                           MusicLiveActivity()
                               .frame(alignment: .center)
@@ -397,6 +404,58 @@ struct ContentView: View {
             alignment: .center
         )
     }
+
+    /// Collapsed face of the Engram focus session. Mirrors `MusicLiveActivity`'s
+    /// geometry — a slot each side of the physical notch, with the black rectangle
+    /// standing in for the notch itself.
+    ///
+    /// The left slot keeps the album art when something is playing: the timer takes
+    /// the session's place in the chain, not the music's identity.
+    @ViewBuilder
+    func FocusLiveActivity(_ info: FocusActivityInfo) -> some View {
+        let slot = max(0, vm.effectiveClosedNotchHeight - 12)
+        let showsAlbumArt = musicManager.isPlaying || !musicManager.isPlayerIdle
+
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            HStack(spacing: 0) {
+                Group {
+                    if showsAlbumArt {
+                        Image(nsImage: musicManager.albumArt)
+                            .resizable()
+                            .clipped()
+                            .clipShape(
+                                RoundedRectangle(
+                                    cornerRadius: MusicPlayerImageSizes.cornerRadiusInset.closed)
+                            )
+                    } else {
+                        Image(systemName: info.phase.symbol)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.gray)
+                    }
+                }
+                .frame(width: slot, height: slot)
+
+                Rectangle()
+                    .fill(.black)
+                    .frame(width: vm.closedNotchSize.width + -cornerRadiusInsets.closed.top)
+
+                Text(info.clockText(at: context.date))
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .foregroundStyle(info.phase == .paused ? .gray : .white)
+                    .frame(width: focusClockWidth, alignment: .center)
+            }
+            .frame(height: vm.effectiveClosedNotchHeight, alignment: .center)
+            // The timeline is the only clock in play, so staleness is checked here
+            // rather than from a timer of our own.
+            .onChange(of: context.date) { _, date in
+                coordinator.clearFocusActivityIfStale(at: date)
+            }
+        }
+    }
+
+    /// Wide enough for "1:00:00" in 13 pt monospaced, so the chin never resizes
+    /// as a deep-work block crosses an hour.
+    private var focusClockWidth: CGFloat { 62 }
 
     @ViewBuilder
     func MusicLiveActivity() -> some View {
