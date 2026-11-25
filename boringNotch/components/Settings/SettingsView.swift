@@ -1821,7 +1821,7 @@ struct AgentsSettings: View {
             Section {
                 Defaults.Toggle("Notify when an AI agent finishes", key: .agentNotifyEnabled)
             } footer: {
-                Text("Wire your agents with scripts/agenticnotch-notify (see README).")
+                Text("Point Claude Code's SessionStart, UserPromptSubmit, Stop and SessionEnd hooks (and Codex's notify) at scripts/agenticnotch-notify — see README. The Agents tab then lists every running session live.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
