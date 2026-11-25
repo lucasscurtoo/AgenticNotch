@@ -63,6 +63,8 @@ struct ContentView: View {
 
         if coordinator.agentActivity.show && vm.notchState == .closed {
             chinWidth = 420
+        } else if !coordinator.needsYou.isEmpty && vm.notchState == .closed {
+            chinWidth = 460  // "Claude needs you" has to fit beside the physical notch
         } else if coordinator.expandingView.type == .battery && coordinator.expandingView.show
             && vm.notchState == .closed && Defaults[.showPowerStatusNotifications]
         {
@@ -270,6 +272,15 @@ struct ContentView: View {
                             .transition(.asymmetric(
                                 insertion: .scale(scale: 0.94, anchor: .top).combined(with: .opacity),
                                 removal: .opacity))
+                    } else if let waiting = coordinator.needsYou.last, vm.notchState == .closed {
+                        NeedsYouView(event: waiting,
+                                     notchGap: vm.closedNotchSize.width + 10,
+                                     notchHeight: vm.effectiveClosedNotchHeight)
+                            .contentShape(Rectangle())
+                            .onTapGesture { coordinator.dismissNeedsYou() }
+                            .transition(.asymmetric(
+                                insertion: .scale(scale: 0.94, anchor: .top).combined(with: .opacity),
+                                removal: .opacity))
                     } else if coordinator.expandingView.type == .battery && coordinator.expandingView.show
                         && vm.notchState == .closed && Defaults[.showPowerStatusNotifications]
                     {
@@ -353,7 +364,7 @@ struct ContentView: View {
                       }
                   }
               }
-              .conditionalModifier((coordinator.sneakPeek.show && (coordinator.sneakPeek.type == .music) && vm.notchState == .closed && !vm.hideOnClosed && Defaults[.sneakPeekStyles] == .standard) || (coordinator.sneakPeek.show && (coordinator.sneakPeek.type != .music) && (vm.notchState == .closed)) || (coordinator.agentActivity.show && vm.notchState == .closed)) { view in
+              .conditionalModifier((coordinator.sneakPeek.show && (coordinator.sneakPeek.type == .music) && vm.notchState == .closed && !vm.hideOnClosed && Defaults[.sneakPeekStyles] == .standard) || (coordinator.sneakPeek.show && (coordinator.sneakPeek.type != .music) && (vm.notchState == .closed)) || (coordinator.agentActivity.show && vm.notchState == .closed) || (!coordinator.needsYou.isEmpty && vm.notchState == .closed)) { view in
                   view
                       .fixedSize()
               }
@@ -595,8 +606,11 @@ struct ContentView: View {
                 haptics.toggle()
             }
             
+            // A "needs you" card holds hover-open, like a sneak peek, so the click
+            // that dismisses it lands on the card instead of an opening notch.
             guard vm.notchState == .closed,
                   !coordinator.sneakPeek.show,
+                  coordinator.needsYou.isEmpty,
                   Defaults[.openNotchOnHover] else { return }
             
             hoverTask = Task {
@@ -606,7 +620,8 @@ struct ContentView: View {
                 await MainActor.run {
                     guard self.vm.notchState == .closed,
                           self.isHovering,
-                          !self.coordinator.sneakPeek.show else { return }
+                          !self.coordinator.sneakPeek.show,
+                          self.coordinator.needsYou.isEmpty else { return }
                     
                     self.doOpen()
                 }
@@ -735,27 +750,38 @@ struct GeneralDropTargetDelegate: DropDelegate {
 
 // MARK: - Agent activity view (AgenticNotch)
 
-struct AgentActivityView: View {
-    let info: AgentActivityInfo
-    /// Width of the physical notch to leave black in the middle.
-    let notchGap: CGFloat
-    /// Height of the physical notch (top row aligns to it).
-    let notchHeight: CGFloat
+extension AgentStatus {
+    var color: Color {
+        switch self {
+        case .ok:      return .green
+        case .error:   return .red
+        case .waiting: return .yellow
+        }
+    }
 
-    private var accent: Color { info.status == .ok ? .green : .red }
-    // Only ~80pt of width next to the physical notch, so the tool name alone —
-    // "Claude finished" truncates to "Claude fini…".
-    private var header: String { info.toolDisplayName }
+    var symbol: String {
+        switch self {
+        case .ok:      return "checkmark.circle.fill"
+        case .error:   return "xmark.octagon.fill"
+        case .waiting: return "hand.raised.fill"
+        }
+    }
+}
+
+/// Tool chip with a status dot in the corner.
+struct AgentToolChip: View {
+    let tool: String
+    let accent: Color
+
     private var toolGlyph: String {
-        switch info.tool.lowercased() {
+        switch tool.lowercased() {
         case "claude": return "sparkle"
         case "codex":  return "chevron.left.forwardslash.chevron.right"
         default:       return "cpu"
         }
     }
 
-    // Tool chip with a status dot in the corner.
-    private var toolChip: some View {
+    var body: some View {
         ZStack(alignment: .bottomTrailing) {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(.white.opacity(0.10))
@@ -771,13 +797,26 @@ struct AgentActivityView: View {
                 .shadow(color: accent.opacity(0.7), radius: 2)
         }
     }
+}
+
+struct AgentActivityView: View {
+    let info: AgentActivityInfo
+    /// Width of the physical notch to leave black in the middle.
+    let notchGap: CGFloat
+    /// Height of the physical notch (top row aligns to it).
+    let notchHeight: CGFloat
+
+    private var accent: Color { info.status.color }
+    // Only ~80pt of width next to the physical notch, so the tool name alone —
+    // "Claude finished" truncates to "Claude fini…".
+    private var header: String { info.toolDisplayName }
 
     var body: some View {
         VStack(spacing: 0) {
             // Top row: flanks the physical notch (tool | gap | project)
             HStack(spacing: 0) {
                 HStack(spacing: 8) {
-                    toolChip
+                    AgentToolChip(tool: info.tool, accent: accent)
                     Text(header)
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.white)
@@ -822,6 +861,73 @@ struct AgentActivityView: View {
     }
 }
 
+// MARK: - "Needs you" card (AgenticNotch)
+
+/// Shown while a session is blocked on the user. Unlike `AgentActivityView` it
+/// never auto-collapses; the coordinator removes it (or a click does).
+struct NeedsYouView: View {
+    let event: AgentEvent
+    let notchGap: CGFloat
+    let notchHeight: CGFloat
+
+    @State private var pulse = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private let accent = AgentStatus.waiting.color
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Top row: flanks the physical notch (tool needs you | gap | waiting)
+            HStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    AgentToolChip(tool: event.tool, accent: accent)
+                    Text("\(event.toolDisplayName) needs you")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(accent)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 12)
+
+                Rectangle().fill(.black).frame(width: notchGap)
+
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(accent)
+                        .frame(width: 6, height: 6)
+                        .opacity(pulse ? 0.25 : 1)
+                    Text("waiting")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(accent.opacity(0.85))
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.trailing, 12)
+            }
+            .frame(height: max(notchHeight, 24))
+
+            // "<project> · <short reason>" below the notch.
+            Text(event.subtitle)
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.9))
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.top, 2)
+                .padding(.bottom, 8)
+        }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { pulse = true }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Dismiss")
+    }
+}
+
 // MARK: - Agent history tab (AgenticNotch)
 
 struct AgentHistoryView: View {
@@ -844,8 +950,8 @@ struct AgentHistoryView: View {
                     VStack(spacing: 6) {
                         ForEach(history) { rec in
                             HStack(spacing: 10) {
-                                Image(systemName: rec.isOK ? "checkmark.circle.fill" : "xmark.octagon.fill")
-                                    .foregroundStyle(rec.isOK ? .green : .red)
+                                Image(systemName: rec.statusKind.symbol)
+                                    .foregroundStyle(rec.statusKind.color)
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(rec.project.isEmpty ? rec.displayTool : "\(rec.displayTool) · \(rec.project)")
                                         .font(.system(size: 13, weight: .medium))
