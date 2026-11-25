@@ -1,13 +1,21 @@
 #!/usr/bin/env bash
-# agenticnotch-notify — poke AgenticNotch when an AI CLI agent finishes or needs you.
-# Usage: agenticnotch-notify --tool claude --status ok [--project NAME] [--title TEXT]
-# Claude Code hook JSON on stdin (SessionStart, UserPromptSubmit, Notification,
-# Stop, SessionEnd) becomes agenticnotch://agent-event?tool=&event=&session=&project=&detail=
-# with event session_start|prompt|waiting|stop|session_end. Without hook JSON
-# (Codex `notify`, manual runs) it sends the legacy agenticnotch://done URL.
-# On Stop, or with no hook event, it derives a short "what it did" title from the
-# last assistant message unless --title is given.
-# Set AGENTICNOTCH_DEBUG=1 to print the URL instead of opening it.
+# agenticnotch-notify — poke AgenticNotch from AI CLI agent hooks.
+# Usage: agenticnotch-notify --tool claude [--status ok] [--project NAME] [--title TEXT]
+#
+# Claude Code: point the SessionStart, UserPromptSubmit, Notification, Stop and
+# SessionEnd hooks here; hook_event_name / session_id / cwd come from the stdin JSON.
+# Codex: `notify` appends its JSON payload (only agent-turn-complete) as the last arg.
+#
+# Each call opens exactly one URL:
+#   - session id known (every Claude hook, Codex thread-id) →
+#     agenticnotch://agent-event?tool=&event=<session_start|prompt|waiting|stop|session_end>&session=&project=&detail=
+#     which feeds the "needs you" card, the finish card + history (on stop) and the
+#     live session list.
+#   - no session id (manual run, old setups) → the legacy agenticnotch://done URL;
+#     --status only reaches this one.
+# On stop it derives a short "what it did" title from the transcript unless --title
+# is given. Set AGENTICNOTCH_DEBUG=1 to print the URL instead of opening it (never in
+# a real hook: SessionStart/UserPromptSubmit stdout goes into Claude's context).
 set -euo pipefail
 
 # Capture stdin (hook JSON) BEFORE anything else consumes it. Guarded so manual
@@ -24,41 +32,43 @@ while [ $# -gt 0 ]; do
     --status)  status="${2:-}"; shift 2 ;;
     --project) project="${2:-}"; shift 2 ;;
     --title)   title="${2:-}"; shift 2 ;;
+    "{"*)      hook_json="${hook_json:-$1}"; shift ;;   # Codex notify payload
     *)         shift ;;
   esac
 done
 
-# Claude Code hook fields, \x1f-separated so empty ones don't collapse.
+# Hook fields, joined by the unit separator so empty ones survive `read`.
 hook_event=""; session=""; cwd=""; message=""; ntype=""
 if [ -n "$hook_json" ]; then
   IFS=$'\x1f' read -r hook_event session cwd message ntype < <(HOOK_JSON="$hook_json" python3 -c '
 import os, json
 try:
-    h = json.loads(os.environ.get("HOOK_JSON", ""))
+    h = json.loads(os.environ["HOOK_JSON"])
 except Exception:
     h = {}
-if not isinstance(h, dict):
-    h = {}
-f = lambda k: " ".join(str(h.get(k) or "").split())  # split() also eats \x1f
-print("\x1f".join(f(k) for k in ("hook_event_name", "session_id", "cwd", "message", "notification_type")))
+h = h if isinstance(h, dict) else {}
+def f(*keys):
+    return " ".join(str(next((h[k] for k in keys if h.get(k)), "")).split())
+print("\x1f".join([f("hook_event_name"), f("session_id", "thread-id"), f("cwd"), f("message"),
+                   f("notification_type")]))
 ' 2>/dev/null) || true
 fi
-project="${project:-$(basename "${cwd:-$PWD}")}"
 
+# Claude hook -> contract event. No hook name means Codex or a manual run: a finished turn.
 case "$hook_event" in
-  "")               event="" ;;   # Codex / manual run → legacy done URL
-  SessionStart)     event="session_start" ;;
-  UserPromptSubmit) event="prompt" ;;
-  Notification)     event="waiting" ;;
-  Stop)             event="stop" ;;
-  SessionEnd)       event="session_end" ;;
-  *)                exit 0 ;;     # a hook we don't map: stay quiet
+  SessionStart)     event=session_start ;;
+  UserPromptSubmit) event=prompt ;;
+  Notification)     event=waiting ;;
+  Stop|"")          event=stop ;;
+  SessionEnd)       event=session_end ;;
+  *)                exit 0 ;;   # a hook we don't map: stay quiet
 esac
 # auth_success is a Notification too, but nobody is waiting on the user.
-if [ "$event" = "waiting" ] && [ "$ntype" = "auth_success" ]; then exit 0; fi
+if [ "$event" = waiting ] && [ "$ntype" = auth_success ]; then exit 0; fi
+[ -n "$project" ] || project="$(basename "${cwd:-$PWD}")"
 
 # Derive a short summary from the hook JSON's transcript (last assistant text).
-if [ -z "$title" ] && [ -n "$hook_json" ] && { [ -z "$event" ] || [ "$event" = "stop" ]; }; then
+if [ "$event" = stop ] && [ -z "$title" ] && [ -n "$hook_json" ]; then
   title="$(HOOK_JSON="$hook_json" python3 -c '
 import os, json
 raw = os.environ.get("HOOK_JSON", "")
@@ -100,14 +110,22 @@ print(out)
 ' 2>/dev/null || true)"
 fi
 
-enc() { python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "${1:-}"; }
-if [ -n "$event" ]; then
-  detail="$title"
-  [ "$event" = "waiting" ] && detail="$message"
-  url="agenticnotch://agent-event?tool=$(enc "$tool")&event=$event&session=$(enc "$session")&project=$(enc "$project")&detail=$(enc "$detail")"
-else
-  url="agenticnotch://done?tool=$(enc "$tool")&status=$(enc "$status")&project=$(enc "$project")&title=$(enc "$title")"
-fi
+# Built in a single python call (UserPromptSubmit blocks the prompt while we run).
+url="$(TOOL="$tool" STATUS="$status" PROJECT="$project" TITLE="$title" EVENT="$event" \
+       SESSION="$session" MESSAGE="$message" python3 -c '
+import os
+from urllib.parse import urlencode, quote
+e = os.environ
+q = lambda d: urlencode(d, quote_via=quote)
+if e["SESSION"]:
+    detail = {"stop": e["TITLE"], "waiting": e["MESSAGE"]}.get(e["EVENT"], "")
+    print("agenticnotch://agent-event?" + q({"tool": e["TOOL"], "event": e["EVENT"],
+          "session": e["SESSION"], "project": e["PROJECT"], "detail": detail}))
+elif e["EVENT"] == "stop":
+    print("agenticnotch://done?" + q({"tool": e["TOOL"], "status": e["STATUS"],
+                                      "project": e["PROJECT"], "title": e["TITLE"]}))
+')"
+[ -n "$url" ] || exit 0   # a non-stop event without a session has nothing to key on
 
 if [ "${AGENTICNOTCH_DEBUG:-}" = "1" ]; then
   echo "$url"

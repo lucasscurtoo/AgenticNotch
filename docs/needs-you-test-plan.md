@@ -10,7 +10,10 @@ script does.
 ## 0. Setup
 
 - Settings ▸ Agents: **Alert when an agent needs me** is on (default), **Play a sound** on.
-- Parser self-checks, no app needed: `scripts/test-agent-event` → `AgentEvent self-checks passed`.
+- Parser + live-session self-checks, no app needed: `scripts/test-agent-event` → `AgentEvent self-checks passed …`
+  and `AgentSession self-checks passed …`.
+- Every `agent-event` below also lands in the Agents tab's **Live** list
+  (`docs/live-sessions-test-plan.md`); the combined walk-through is `docs/agents-v2-test-plan.md`.
 
 ## 1. The card shows, and stays
 
@@ -94,7 +97,8 @@ because they carry no session.
 ```sh
 open -g "agenticnotch://agent-event?event=waiting&session=s1"                 # no tool
 open -g "agenticnotch://agent-event?tool=claude&event=sleeping&session=s1"    # unknown event
-open -g "agenticnotch://agent-event?tool=claude"                              # no event
+open -g "agenticnotch://agent-event?tool=claude&session=s1"                   # no event
+open -g "agenticnotch://agent-event?tool=claude&event=waiting"                # no session
 ```
 
 No card, no crash. Console.app shows `AgenticNotch: ignored URL …`.

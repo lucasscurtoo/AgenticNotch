@@ -39,6 +39,9 @@ the notch did before: music controls, calendar, file shelf and HUD replacement.
   or idle waiting for input), the notch pops an amber card — *Claude needs you* ·
   project · reason — with its own chime. It stays until that session moves on (you
   answer, it stops, or it ends) or you click it. Toggle under **Settings → Agents**.
+- 🟢 **Live sessions** — every running Claude Code / Codex session in the Agents tab
+  (tool · project · working / needs you / done · time in that state), plus a pulsing dot
+  and a count beside the closed notch while any of them is working (amber if one needs you).
 - 🕑 **History** — the last 10 runs, in a dedicated notch tab and in Settings.
 - 📊 **AI limits tab** — how much of your Claude and Codex quota is gone and when each
   window resets. Claude comes from the usage cache Claude Code writes to `~/.claude.json`
@@ -83,11 +86,12 @@ Capabilities**, or just use the script above.
 
 ## Wiring your agents
 
-The notch reacts when a CLI agent finishes a turn. Configure the sound and behaviour under
-**Settings → Agents**, and point your agent at the bundled script (absolute path):
+The notch reacts when a CLI agent finishes a turn, and tracks every session while it runs.
+Configure the sound and behaviour under **Settings → Agents**, and point your agent at the
+bundled script (absolute path):
 
-**Claude Code** — `~/.claude/settings.json` (same command on every event; the script reads
-which hook fired from the JSON Claude Code pipes to it):
+**Claude Code** — `~/.claude/settings.json`. Every hook runs the same command; the script
+reads which event fired from the hook's JSON:
 ```json
 {
   "hooks": {
@@ -99,19 +103,24 @@ which hook fired from the JSON Claude Code pipes to it):
   }
 }
 ```
-- `Stop` → the "finished" card. The summary is derived from the last assistant message;
-  `project` is the basename of the session's working directory.
-- `Notification` → the amber "needs you" card (permission requests, idle waiting for
+- **Stop** pops the finish card + chime and records it in History. The summary is derived
+  from the last assistant message; `project` is the basename of the session's cwd.
+- **Notification** pops the amber "needs you" card (permission requests, idle waiting for
   input). `UserPromptSubmit`, `Stop` and `SessionEnd` from the same session clear it.
-- Each event becomes
+- All five feed the live session list: a session is *working* from start or prompt,
+  *needs you* while a running turn is blocked on you, *done* after Stop (listed for 10
+  minutes), and leaves on SessionEnd. Sessions silent for 2 hours are dropped as stale.
+- Each hook opens exactly one URL,
   `agenticnotch://agent-event?tool=claude&event=<session_start|prompt|waiting|stop|session_end>&session=<id>&project=<name>&detail=<text>`.
-  An older setup with only the `Stop` hook keeps working.
+  An older `Stop`-only setup keeps working, and the legacy
+  `agenticnotch://done?tool=&status=&project=&title=` URL is still accepted.
 
 **Codex** — `~/.codex/config.toml`:
 ```toml
 notify = ["/absolute/path/to/AgenticNotch/scripts/agenticnotch-notify", "--tool", "codex", "--status", "ok"]
 ```
-Codex appends a JSON event payload as a trailing argument; the script ignores it.
+Codex only reports finished turns (`agent-turn-complete`, appended as a JSON argument): each
+one pops the finish card and lists the session (its `thread-id`) as *done* in the Live list.
 
 ## Usage
 
@@ -124,7 +133,7 @@ Codex appends a JSON event payload as a trailing argument; the script ignores it
 - [x] Run history 🕑
 - [ ] Per-project filters and mute rules 🔕
 - [ ] More agents (Gemini CLI, Cursor, Aider) 🤖
-- [ ] Live "agent is working" state, not just finished 🔄
+- [x] Live "agent is working" state, not just finished 🔄
 - [ ] Own appcast so the app can auto-update ⬆️
 
 ## 🤝 Contributing

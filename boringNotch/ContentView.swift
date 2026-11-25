@@ -19,6 +19,7 @@ struct ContentView: View {
     @ObservedObject var webcamManager = WebcamManager.shared
 
     @ObservedObject var coordinator = BoringViewCoordinator.shared
+    @ObservedObject var agentSessions = AgentSessionStore.shared
     @ObservedObject var musicManager = MusicManager.shared
     @ObservedObject var batteryModel = BatteryStatusViewModel.shared
     @ObservedObject var brightnessManager = BrightnessManager.shared
@@ -73,6 +74,8 @@ struct ContentView: View {
             && !vm.hideOnClosed
         {
             chinWidth += (max(0, vm.effectiveClosedNotchHeight - 12) + focusClockWidth + 20)
+        } else if showsAgentSessionsIndicator {
+            chinWidth += (max(0, vm.effectiveClosedNotchHeight - 12) + agentSessionsIndicatorWidth + 20)
         } else if (!coordinator.expandingView.show || coordinator.expandingView.type == .music)
             && vm.notchState == .closed && (musicManager.isPlaying || !musicManager.isPlayerIdle)
             && coordinator.musicLiveActivityEnabled && !vm.hideOnClosed
@@ -314,6 +317,9 @@ struct ContentView: View {
                       } else if let focus = coordinator.focusActivity, vm.notchState == .closed, !vm.hideOnClosed {
                           FocusLiveActivity(focus)
                               .transition(.opacity)
+                      } else if showsAgentSessionsIndicator {
+                          AgentSessionsIndicator()
+                              .transition(.opacity)
                       } else if (!coordinator.expandingView.show || coordinator.expandingView.type == .music) && vm.notchState == .closed && (musicManager.isPlaying || !musicManager.isPlayerIdle) && coordinator.musicLiveActivityEnabled && !vm.hideOnClosed {
                           MusicLiveActivity()
                               .frame(alignment: .center)
@@ -424,27 +430,9 @@ struct ContentView: View {
     /// the session's place in the chain, not the music's identity.
     @ViewBuilder
     func FocusLiveActivity(_ info: FocusActivityInfo) -> some View {
-        let slot = max(0, vm.effectiveClosedNotchHeight - 12)
-        let showsAlbumArt = musicManager.isPlaying || !musicManager.isPlayerIdle
-
         TimelineView(.periodic(from: .now, by: 1)) { context in
             HStack(spacing: 0) {
-                Group {
-                    if showsAlbumArt {
-                        Image(nsImage: musicManager.albumArt)
-                            .resizable()
-                            .clipped()
-                            .clipShape(
-                                RoundedRectangle(
-                                    cornerRadius: MusicPlayerImageSizes.cornerRadiusInset.closed)
-                            )
-                    } else {
-                        Image(systemName: info.phase.symbol)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.gray)
-                    }
-                }
-                .frame(width: slot, height: slot)
+                ClosedLeadingSlot(symbol: info.phase.symbol)
 
                 Rectangle()
                     .fill(.black)
@@ -467,6 +455,61 @@ struct ContentView: View {
     /// Wide enough for "1:00:00" in 13 pt monospaced, so the chin never resizes
     /// as a deep-work block crosses an hour.
     private var focusClockWidth: CGFloat { 62 }
+
+    /// Left of the physical notch in a closed live activity: the album art while
+    /// something plays, otherwise the activity's own symbol.
+    @ViewBuilder
+    func ClosedLeadingSlot(symbol: String) -> some View {
+        let slot = max(0, vm.effectiveClosedNotchHeight - 12)
+        Group {
+            if musicManager.isPlaying || !musicManager.isPlayerIdle {
+                Image(nsImage: musicManager.albumArt)
+                    .resizable()
+                    .clipped()
+                    .clipShape(
+                        RoundedRectangle(
+                            cornerRadius: MusicPlayerImageSizes.cornerRadiusInset.closed)
+                    )
+            } else {
+                Image(systemName: symbol)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.gray)
+            }
+        }
+        .frame(width: slot, height: slot)
+    }
+
+    /// Closed-notch hint that agents are running: a pulsing dot and how many sessions
+    /// are in flight (working or blocked on you). Amber while any of them needs you.
+    /// Ranks below the focus timer and above music, like a live activity.
+    private var showsAgentSessionsIndicator: Bool {
+        agentSessions.activeCount > 0 && vm.notchState == .closed && !vm.hideOnClosed
+    }
+
+    private var agentSessionsIndicatorWidth: CGFloat { 36 }
+
+    @ViewBuilder
+    func AgentSessionsIndicator() -> some View {
+        HStack(spacing: 0) {
+            ClosedLeadingSlot(symbol: "sparkles")
+
+            Rectangle()
+                .fill(.black)
+                .frame(width: vm.closedNotchSize.width + -cornerRadiusInsets.closed.top)
+
+            HStack(spacing: 5) {
+                Image(systemName: "circle.fill")
+                    .font(.system(size: 7))
+                    .foregroundStyle(agentSessions.anyNeedsYou ? AgentStatus.waiting.color : .green)
+                    .symbolEffect(.pulse, options: .repeating)
+                Text("\(agentSessions.activeCount)")
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: agentSessionsIndicatorWidth, alignment: .center)
+        }
+        .frame(height: vm.effectiveClosedNotchHeight, alignment: .center)
+    }
 
     @ViewBuilder
     func MusicLiveActivity() -> some View {
@@ -773,7 +816,9 @@ struct AgentToolChip: View {
     let tool: String
     let accent: Color
 
-    private var toolGlyph: String {
+    private var toolGlyph: String { Self.glyph(for: tool) }
+
+    static func glyph(for tool: String) -> String {
         switch tool.lowercased() {
         case "claude": return "sparkle"
         case "codex":  return "chevron.left.forwardslash.chevron.right"
@@ -932,10 +977,11 @@ struct NeedsYouView: View {
 
 struct AgentHistoryView: View {
     @Default(.agentHistory) var history
+    @ObservedObject var live = AgentSessionStore.shared
 
     var body: some View {
         Group {
-            if history.isEmpty {
+            if history.isEmpty && live.sessions.isEmpty {
                 VStack(spacing: 6) {
                     Image(systemName: "sparkles")
                         .font(.title2)
@@ -948,6 +994,11 @@ struct AgentHistoryView: View {
             } else {
                 ScrollView {
                     VStack(spacing: 6) {
+                        if !live.sessions.isEmpty {
+                            sectionHeader("Live")
+                            LiveSessionRows(sessions: live.sessions)
+                            if !history.isEmpty { sectionHeader("History") }
+                        }
                         ForEach(history) { rec in
                             HStack(spacing: 10) {
                                 Image(systemName: rec.statusKind.symbol)
@@ -978,6 +1029,62 @@ struct AgentHistoryView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.gray)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, 4)
+    }
+}
+
+/// One row per running agent session: tool, project, state and how long it has
+/// been in that state. Ticks every second only while the tab is open.
+struct LiveSessionRows: View {
+    let sessions: [AgentSession]
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            VStack(spacing: 6) {
+                ForEach(sessions) { session in
+                    HStack(spacing: 10) {
+                        Image(systemName: AgentToolChip.glyph(for: session.tool))
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 22, height: 22)
+                            .background(.white.opacity(0.10),
+                                        in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        let tool = AgentActivityInfo.displayName(for: session.tool)
+                        Text(session.project.isEmpty ? tool : "\(tool) · \(session.project)")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                        Text(session.state.label)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(color(session.state))
+                        Text(Duration.seconds(Int(max(0, context.date.timeIntervalSince(session.since))))
+                            .formatted(.units(allowed: [.hours, .minutes, .seconds], width: .narrow,
+                                              maximumUnitCount: 2)))
+                            .font(.system(size: 11).monospacedDigit())
+                            .foregroundStyle(.gray)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+                }
+            }
+        }
+    }
+
+    private func color(_ state: AgentSession.State) -> Color {
+        switch state {
+        case .working:  return .green
+        case .needsYou: return AgentStatus.waiting.color
+        case .done:     return .gray
+        }
     }
 }
 
