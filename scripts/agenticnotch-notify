@@ -1,9 +1,17 @@
 #!/usr/bin/env bash
-# agenticnotch-notify — poke AgenticNotch when an AI CLI agent finishes.
-# Usage: agenticnotch-notify --tool claude --status ok [--project NAME] [--title TEXT]
-# If no --title is given and Stop-hook JSON arrives on stdin (Claude Code),
-# derives a short "what it did" title from the last assistant message.
-# Set AGENTICNOTCH_DEBUG=1 to print the URL instead of opening it.
+# agenticnotch-notify — poke AgenticNotch from AI CLI agent hooks.
+# Usage: agenticnotch-notify --tool claude [--status ok] [--project NAME] [--title TEXT]
+#
+# Claude Code: point the SessionStart, UserPromptSubmit, Notification, Stop and
+# SessionEnd hooks here; hook_event_name / session_id / cwd come from the stdin JSON.
+# Codex: `notify` appends its JSON payload (only agent-turn-complete) as the last arg.
+#
+# A finished turn (Stop, Codex, or a manual run) fires `agenticnotch://done` — finish
+# card + chime + history, with a "what it did" title derived from the transcript.
+# Whenever a session id is known it also fires `agenticnotch://agent-event`, which
+# feeds the live session list. Set AGENTICNOTCH_DEBUG=1 to print the URL(s) instead
+# of opening them (never in a real hook: SessionStart/UserPromptSubmit stdout goes
+# into Claude's context).
 set -euo pipefail
 
 # Capture stdin (hook JSON) BEFORE anything else consumes it. Guarded so manual
@@ -13,19 +21,47 @@ if [ ! -t 0 ]; then
   IFS= read -r -d '' -t 1 hook_json <&0 || true
 fi
 
-tool=""; status="ok"; project="$(basename "$PWD")"; title=""
+tool=""; status="ok"; project=""; title=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --tool)    tool="${2:-}"; shift 2 ;;
     --status)  status="${2:-}"; shift 2 ;;
     --project) project="${2:-}"; shift 2 ;;
     --title)   title="${2:-}"; shift 2 ;;
+    "{"*)      hook_json="${hook_json:-$1}"; shift ;;   # Codex notify payload
     *)         shift ;;
   esac
 done
 
+# Hook fields, joined by the unit separator so empty ones survive `read`.
+hook_event=""; session=""; cwd=""; message=""
+if [ -n "$hook_json" ]; then
+  IFS=$'\x1f' read -r hook_event session cwd message < <(HOOK_JSON="$hook_json" python3 -c '
+import os, json
+try:
+    h = json.loads(os.environ["HOOK_JSON"])
+except Exception:
+    h = {}
+h = h if isinstance(h, dict) else {}
+def f(*keys):
+    return " ".join(str(next((h[k] for k in keys if h.get(k)), "")).split())
+print("\x1f".join([f("hook_event_name"), f("session_id", "thread-id"), f("cwd"), f("message")]))
+' 2>/dev/null) || true
+fi
+
+# Claude hook -> contract event. No hook name means Codex or a manual run: a finished turn.
+case "$hook_event" in
+  SessionStart)     event=session_start ;;
+  UserPromptSubmit) event=prompt ;;
+  Notification)     event=waiting ;;
+  Stop|"")          event=stop ;;
+  SessionEnd)       event=session_end ;;
+  *)                exit 0 ;;
+esac
+[ -n "$project" ] || project="$(basename "${cwd:-$PWD}")"
+
 # Derive a short summary from the hook JSON's transcript (last assistant text).
-if [ -z "$title" ] && [ -n "$hook_json" ]; then
+if [ "$event" = stop ] && [ -z "$title" ] && [ -n "$hook_json" ]; then
   title="$(HOOK_JSON="$hook_json" python3 -c '
 import os, json
 raw = os.environ.get("HOOK_JSON", "")
@@ -67,11 +103,26 @@ print(out)
 ' 2>/dev/null || true)"
 fi
 
-enc() { python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "${1:-}"; }
-url="agenticnotch://done?tool=$(enc "$tool")&status=$(enc "$status")&project=$(enc "$project")&title=$(enc "$title")"
+# One URL per line, built in a single python call (UserPromptSubmit blocks the prompt).
+urls="$(TOOL="$tool" STATUS="$status" PROJECT="$project" TITLE="$title" EVENT="$event" \
+        SESSION="$session" MESSAGE="$message" python3 -c '
+import os
+from urllib.parse import urlencode, quote
+e = os.environ
+q = lambda d: urlencode(d, quote_via=quote)
+if e["EVENT"] == "stop":
+    print("agenticnotch://done?" + q({"tool": e["TOOL"], "status": e["STATUS"],
+                                      "project": e["PROJECT"], "title": e["TITLE"]}))
+if e["SESSION"]:
+    detail = e["TITLE"] if e["EVENT"] == "stop" else e["MESSAGE"]
+    print("agenticnotch://agent-event?" + q({"tool": e["TOOL"], "event": e["EVENT"],
+          "session": e["SESSION"], "project": e["PROJECT"], "detail": detail}))
+')"
+[ -n "$urls" ] || exit 0
 
 if [ "${AGENTICNOTCH_DEBUG:-}" = "1" ]; then
-  echo "$url"
+  echo "$urls"
 else
-  open -g "$url"
+  set -f; IFS=$'\n'   # split on lines only; the URLs contain `?`, never glob them
+  open -g $urls
 fi
