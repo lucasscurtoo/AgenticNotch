@@ -35,8 +35,11 @@ Closed notch: pulsing **green** dot + **2**. Agents tab ▸ **Live**: two rows,
 ## 2. One of them needs you
 
 ```sh
-open -g "agenticnotch://agent-event?tool=claude&event=waiting&session=test-a&project=gcu-api&detail=Claude%20needs%20your%20permission%20to%20use%20Bash"
+open -g "agenticnotch://agent-event?tool=claude&event=waiting&session=test-a&project=gcu-api&kind=permission&detail=Claude%20needs%20your%20permission%20to%20use%20Bash"
 ```
+
+`kind=permission` is what the hook script sends for a permission prompt or a question
+(no `kind` at all means the same).
 
 - Closed notch: amber card **Claude needs you** · **● waiting** · `gcu-api · permission to
   use Bash`, with its own chime. It stays (no 4 s collapse) and hovering doesn't open the notch.
@@ -57,7 +60,21 @@ open -g "agenticnotch://agent-event?tool=claude&event=stop&session=test-b&projec
 - History gains a green ✓ `Claude · web-app` entry.
 - Live: web-app → `done` (gray); the count drops to **1**, still amber.
 
-## 4. Answering clears it
+## 4. The idle reminder after a finish is ignored
+
+About 60 s after a finished turn Claude fires `Notification` again ("Claude is waiting for
+your input", `notification_type: idle_prompt`); the script sends it with `kind=idle`.
+web-app finished in step 3:
+
+```sh
+open -g "agenticnotch://agent-event?tool=claude&event=waiting&session=test-b&project=web-app&kind=idle&detail=Claude%20is%20waiting%20for%20your%20input"
+```
+
+Nothing happens: no new amber card or chime (gcu-api's card from step 3 stays exactly as
+it was), no amber History entry, and the web-app row stays `done` with its timer still
+counting from step 3 (indicator count unchanged).
+
+## 5. Answering clears it
 
 ```sh
 open -g "agenticnotch://agent-event?tool=claude&event=prompt&session=test-a&project=gcu-api"
@@ -65,7 +82,7 @@ open -g "agenticnotch://agent-event?tool=claude&event=prompt&session=test-a&proj
 
 Amber card gone; indicator back to **green** + **1**; gcu-api `working` again.
 
-## 5. Finish and end
+## 6. Finish and end
 
 ```sh
 open -g "agenticnotch://agent-event?tool=claude&event=stop&session=test-a&project=gcu-api&detail=Merged%20the%20branches"
@@ -76,7 +93,7 @@ Finish card for gcu-api; once it collapses nothing is working, so the indicator 
 After `session_end` gcu-api leaves Live; web-app stays as `done` until 10 minutes after
 step 3, then drops on its own (the Live header goes with it).
 
-## 6. Codex
+## 7. Codex
 
 ```sh
 open -g "agenticnotch://agent-event?tool=codex&event=stop&session=thread-1&project=web-app"
@@ -84,7 +101,7 @@ open -g "agenticnotch://agent-event?tool=codex&event=stop&session=thread-1&proje
 
 Finish card, plus a `Codex · web-app  done` row (Codex only reports finished turns).
 
-## 7. Old `done` URL still works
+## 8. Old `done` URL still works
 
 ```sh
 open -g "agenticnotch://done?tool=claude&status=ok&project=gcu-api&title=Fixed%20the%20build"
@@ -93,7 +110,7 @@ open -g "agenticnotch://done?tool=codex&status=error&project=web"
 
 Same green / red cards as before, History entries, Live list untouched (no session).
 
-## 8. Malformed URLs are ignored
+## 9. Malformed URLs are ignored
 
 ```sh
 open -g "agenticnotch://agent-event?event=waiting&session=s1"                 # no tool
@@ -103,13 +120,14 @@ open -g "agenticnotch://agent-event?tool=claude&event=sleeping&session=s1"    # 
 
 No card, no Live row, no crash; Console.app shows `AgenticNotch: ignored URL …`.
 
-## 9. Through the hook script (no app needed)
+## 10. Through the hook script (no app needed)
 
 ```sh
 S=scripts/agenticnotch-notify; export AGENTICNOTCH_DEBUG=1
 echo '{"hook_event_name":"SessionStart","session_id":"abc","cwd":"/tmp/gcu-api"}'     | $S --tool claude
 echo '{"hook_event_name":"UserPromptSubmit","session_id":"abc","cwd":"/tmp/gcu-api"}' | $S --tool claude
 echo '{"hook_event_name":"Notification","session_id":"abc","cwd":"/tmp/gcu-api","message":"Claude needs your permission to use Bash","notification_type":"permission_prompt"}' | $S --tool claude
+echo '{"hook_event_name":"Notification","session_id":"abc","cwd":"/tmp/gcu-api","message":"Claude is waiting for your input","notification_type":"idle_prompt"}' | $S --tool claude
 echo '{"hook_event_name":"Notification","session_id":"abc","notification_type":"auth_success"}' | $S --tool claude
 echo '{"hook_event_name":"Stop","session_id":"abc","cwd":"/tmp/gcu-api"}'             | $S --tool claude
 echo '{"hook_event_name":"SessionEnd","session_id":"abc","cwd":"/tmp/gcu-api"}'       | $S --tool claude
@@ -117,15 +135,17 @@ $S --tool codex --status ok '{"type":"agent-turn-complete","thread-id":"t1","cwd
 $S --tool claude --status error --title "Build broke" </dev/null
 ```
 
-Exactly one URL per line: an `agent-event` for each hook and for Codex, nothing for
-`auth_success`, and the legacy `done` URL only for the last (manual, no session) run.
+Exactly one URL per line: an `agent-event` for each hook and for Codex (the two
+Notifications carry `kind=permission` and `kind=idle`), nothing for `auth_success` or any
+other non-blocking type, and the legacy `done` URL only for the last (manual, no session)
+run. A Notification without `notification_type` (older Claude Code) falls back to the
+message text: "waiting for your input" → `kind=idle`, anything else → `kind=permission`.
 Drop `AGENTICNOTCH_DEBUG` to send them to the app for real.
 
 ## Known differences, on purpose
 
-- Claude fires `Notification` ("Claude is waiting for your input") ~60 s after a finished
-  turn. The card treats it as needing you (you are the one it waits on); the Live row
-  stays `done`, because the turn is over and only a running turn escalates to `needs you`.
+- `kind=idle` is ignored even for a session still `working` (a missed Stop): only a real
+  block raises the card or the `needs you` row, and an idle reminder never creates a row.
 - Claude Code sends no hook when you approve a permission prompt, so both the card and the
   `needs you` row hold until that session's next `prompt` / `stop` / `session_end`, or a
   click on the card.

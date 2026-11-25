@@ -68,9 +68,9 @@ struct AgentSession: Identifiable, Equatable {
         case .stop:
             next = .done
         case .waiting:
-            // Claude also fires Notification ~60 s after a finished turn ("waiting for
-            // your input"). The turn is already done — only a running turn escalates.
-            next = index.map { list[$0].state == .done } == true ? .done : .needsYou
+            // The idle reminder (~60 s after a finished turn) leaves the row as it is.
+            guard event.needsUser else { return list }
+            next = .needsYou
         }
 
         if let index {
@@ -139,9 +139,9 @@ final class AgentSessionStore: ObservableObject {
 extension AgentSession {
     static func runSelfCheck() {
         let t0 = Date(timeIntervalSince1970: 1_735_732_800)
-        func event(_ kind: String, _ session: String = "s1", tool: String = "claude") -> AgentEvent {
+        func event(_ kind: String, _ session: String = "s1", tool: String = "claude", wait: String = "permission") -> AgentEvent {
             AgentEvent.from(url: URL(string:
-                "agenticnotch://agent-event?tool=\(tool)&event=\(kind)&session=\(session)&project=api")!)!
+                "agenticnotch://agent-event?tool=\(tool)&event=\(kind)&session=\(session)&project=api&kind=\(wait)")!)!
         }
 
         // session_start → working
@@ -151,15 +151,20 @@ extension AgentSession {
         s = applying(event("prompt"), to: s, now: t0 + 30)
         assert(s[0].state == .working && s[0].since == t0 && s[0].lastEvent == t0 + 30)
 
-        // waiting → needs you
+        // permission while working → needs you
         s = applying(event("waiting"), to: s, now: t0 + 60)
         assert(s[0].state == .needsYou && s[0].since == t0 + 60)
 
         // stop → done, listed for 10 minutes, then dropped
         s = applying(event("stop"), to: s, now: t0 + 120)
         assert(s[0].state == .done && s[0].since == t0 + 120)
-        s = applying(event("waiting"), to: s, now: t0 + 180)
-        assert(s[0].state == .done, "the idle reminder after a finished turn is not 'needs you'")
+        // idle-after-stop → ignored: the row stays done, its clock untouched
+        let doneRow = s
+        assert(!event("waiting", wait: "idle").needsUser, "no card, no chime, no history entry")
+        s = applying(event("waiting", wait: "idle"), to: s, now: t0 + 180)
+        assert(s == doneRow, "the idle reminder after a finished turn is not 'needs you'")
+        assert(applying(event("waiting", "ghost", wait: "idle"), to: [], now: t0).isEmpty,
+               "an idle reminder never creates a row")
         assert(pruned(s, now: t0 + 120 + doneTTL - 1).count == 1)
         assert(pruned(s, now: t0 + 120 + doneTTL).isEmpty)
 

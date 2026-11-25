@@ -564,6 +564,9 @@ class BoringViewCoordinator: ObservableObject {
     func handleAgentEvent(_ event: AgentEvent) {
         switch event.kind {
         case .waiting:
+            // The idle reminder (~60 s after a finished turn): no card, no chime, no
+            // history entry. Only a real block on the user gets through.
+            guard event.needsUser else { return }
             recordAgentHistory(AgentActivityInfo(tool: event.tool, status: .waiting,
                                                  project: event.project, title: event.detail))
             guard Defaults[.agentNeedsYouEnabled] else { return }

@@ -13,9 +13,9 @@ trap 'rm -rf "$tmp"' EXIT
 cat > "$tmp/main.swift" <<'SWIFT'
 AgentActivityInfo.runSelfCheck()
 AgentEvent.runSelfCheck()
-print("AgentEvent self-checks passed (waiting / malformed / capped / old done URL)")
+print("AgentEvent self-checks passed (waiting / kind=permission|idle / malformed / capped / old done URL)")
 AgentSession.runSelfCheck()
-print("AgentSession self-checks passed (start→working, waiting→needs you, stop→done+expiry, session_end→removed, stale drop)")
+print("AgentSession self-checks passed (start→working, permission while working→needs you, idle after stop→ignored, stop→done+expiry, session_end→removed, stale drop)")
 SWIFT
 
 swiftc -D DEBUG -Onone -o "$tmp/check" \

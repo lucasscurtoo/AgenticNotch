@@ -54,10 +54,10 @@ The amber card stays.
 
 ```sh
 open -g "agenticnotch://agent-event?tool=claude&event=waiting&session=s1&project=gcu-api&detail=Claude%20needs%20your%20permission%20to%20use%20Bash"
-open -g "agenticnotch://agent-event?tool=claude&event=waiting&session=s2&project=web&detail=Claude%20is%20waiting%20for%20your%20input"
+open -g "agenticnotch://agent-event?tool=claude&event=waiting&session=s2&project=web&kind=permission&detail=Claude%20needs%20your%20permission%20to%20use%20WebFetch"
 ```
 
-Shows **web · waiting for your input** (the newest). Then:
+Shows **web · permission to use WebFetch** (the newest). Then:
 
 ```sh
 open -g "agenticnotch://agent-event?tool=claude&event=prompt&session=s2&project=web"
@@ -114,7 +114,9 @@ echo '{"session_id":"s9","cwd":"/tmp/gcu-api","hook_event_name":"UserPromptSubmi
 
 The first command shows the card and the second clears it. Prefix either with
 `AGENTICNOTCH_DEBUG=1` to print the URL instead of opening it. A Notification with
-`"notification_type":"auth_success"` sends nothing.
+`"notification_type":"auth_success"` (or any other non-blocking type) sends nothing;
+`"idle_prompt"` sends `kind=idle`, which the app ignores — no card, no chime, no
+history entry (see `docs/agents-v2-test-plan.md` step 4).
 
 ## 11. Real Claude Code
 

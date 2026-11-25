@@ -35,8 +35,8 @@ the notch did before: music controls, calendar, file shelf and HUD replacement.
 
 - 🔔 **Agent-finished notifications** — when Claude Code or Codex ends a turn, the notch
   pops a card with a short summary of *what it did*, the project, and an ok/error status.
-- ✋ **"Needs you" alerts** — when Claude Code is blocked on you (a permission request,
-  or idle waiting for input), the notch pops an amber card — *Claude needs you* ·
+- ✋ **"Needs you" alerts** — when Claude Code is blocked on you (a permission request
+  or a question), the notch pops an amber card — *Claude needs you* ·
   project · reason — with its own chime. It stays until that session moves on (you
   answer, it stops, or it ends) or you click it. Toggle under **Settings → Agents**.
 - 🟢 **Live sessions** — every running Claude Code / Codex session in the Agents tab
@@ -105,8 +105,10 @@ reads which event fired from the hook's JSON:
 ```
 - **Stop** pops the finish card + chime and records it in History. The summary is derived
   from the last assistant message; `project` is the basename of the session's cwd.
-- **Notification** pops the amber "needs you" card (permission requests, idle waiting for
-  input). `UserPromptSubmit`, `Stop` and `SessionEnd` from the same session clear it.
+- **Notification** pops the amber "needs you" card for real blocks (permission requests,
+  questions). The script passes Claude's `notification_type` on as `kind=permission|idle`;
+  the idle "waiting for your input" reminder after a finished turn (`kind=idle`) is
+  ignored. `UserPromptSubmit`, `Stop` and `SessionEnd` from the same session clear the card.
 - All five feed the live session list: a session is *working* from start or prompt,
   *needs you* while a running turn is blocked on you, *done* after Stop (listed for 10
   minutes), and leaves on SessionEnd. Sessions silent for 2 hours are dropped as stale.

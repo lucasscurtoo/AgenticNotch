@@ -61,7 +61,7 @@ struct AgentActivityInfo: Equatable {
 // MARK: - Agent session events (shared contract)
 
 /// Payload decoded from
-/// `agenticnotch://agent-event?tool=<claude|codex>&event=<kind>&session=<id>&project=<name>&detail=<text>`,
+/// `agenticnotch://agent-event?tool=<claude|codex>&event=<kind>&session=<id>&project=<name>&detail=<text>[&kind=<permission|idle>]`,
 /// one per Claude Code hook (SessionStart, UserPromptSubmit, Notification, Stop,
 /// SessionEnd) or Codex finished turn. Feeds both the "needs you" card
 /// (`BoringViewCoordinator.handleAgentEvent`) and the live session list
@@ -75,11 +75,25 @@ struct AgentEvent: Equatable {
         case sessionEnd = "session_end"
     }
 
+    /// What a `waiting` event is about (`kind=` in the URL). Claude's Notification hook
+    /// fires for real blocks (permission prompts, questions) and for the idle reminder
+    /// ~60 s after a turn already finished; the hook script tells them apart from
+    /// `notification_type`.
+    enum Wait: String {
+        case permission   // blocked on the user — also the default when `kind` is absent
+        case idle         // "Claude is waiting for your input": the turn is over
+    }
+
     var tool: String
     var kind: Kind
     var session: String   // Claude session_id / Codex thread-id
     var project: String   // basename of the session's cwd; may be ""
     var detail: String    // the Notification message, or the Stop summary; may be ""
+    var wait: Wait = .permission   // only meaningful for `.waiting`
+
+    /// A real block on the user: the only thing that raises the "needs you" card and
+    /// the Live row's `needs you`. An idle reminder changes nothing.
+    var needsUser: Bool { kind == .waiting && wait == .permission }
 
     /// The scheme is registered and unauthenticated: cap every string where it enters,
     /// before we render it or persist it into the history.
@@ -97,7 +111,8 @@ struct AgentEvent: Equatable {
         let tool = q("tool", max: 32), session = q("session", max: 128)
         guard !tool.isEmpty, !session.isEmpty else { return nil }
         return AgentEvent(tool: tool, kind: kind, session: session,
-                          project: q("project", max: 80), detail: q("detail", max: maxDetailLength))
+                          project: q("project", max: 80), detail: q("detail", max: maxDetailLength),
+                          wait: Wait(rawValue: q("kind", max: 16)) ?? .permission)
     }
 
     var toolDisplayName: String { AgentActivityInfo.displayName(for: tool) }
@@ -124,6 +139,14 @@ struct AgentEvent: Equatable {
         assert(waiting == AgentEvent(tool: "claude", kind: .waiting, session: "abc-123",
                                      project: "gcu-api", detail: "Claude needs your permission to use Bash"))
         assert(waiting?.shortReason == "permission to use Bash")
+        assert(waiting?.needsUser == true, "no kind = a real block, as before")
+
+        // kind= decides, not the message text.
+        let idle = from(url: URL(string: "agenticnotch://agent-event?tool=claude&event=waiting&session=s&kind=idle&detail=Claude%20is%20waiting%20for%20your%20input")!)
+        assert(idle?.wait == .idle && idle?.needsUser == false)
+        assert(from(url: URL(string: "agenticnotch://agent-event?tool=claude&event=waiting&session=s&kind=permission")!)?.needsUser == true)
+        assert(from(url: URL(string: "agenticnotch://agent-event?tool=claude&event=waiting&session=s&kind=bogus")!)?.wait == .permission)
+        assert(from(url: URL(string: "agenticnotch://agent-event?tool=claude&event=stop&session=s&kind=permission")!)?.needsUser == false)
         assert(waiting?.subtitle == "gcu-api · permission to use Bash")
         assert(from(url: URL(string: "agenticnotch://agent-event?tool=claude&event=waiting&session=s&detail=Claude%20is%20waiting%20for%20your%20input")!)?
                .subtitle == "waiting for your input")

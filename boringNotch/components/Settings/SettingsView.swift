@@ -1822,7 +1822,7 @@ struct AgentsSettings: View {
                 Defaults.Toggle("Notify when an AI agent finishes", key: .agentNotifyEnabled)
                 Defaults.Toggle("Alert when an agent needs me", key: .agentNeedsYouEnabled)
             } footer: {
-                Text("Point Claude Code's SessionStart, UserPromptSubmit, Notification, Stop and SessionEnd hooks (and Codex's notify) at scripts/agenticnotch-notify — see README. The Agents tab then lists every running session live. The needs-me alert comes from the Notification hook (permission requests, waiting for input) and stays until that session moves on or you click it.")
+                Text("Point Claude Code's SessionStart, UserPromptSubmit, Notification, Stop and SessionEnd hooks (and Codex's notify) at scripts/agenticnotch-notify — see README. The Agents tab then lists every running session live. The needs-me alert comes from the Notification hook (permission requests and questions, not the idle reminder after a finished turn) and stays until that session moves on or you click it.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

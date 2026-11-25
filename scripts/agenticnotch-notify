@@ -9,6 +9,7 @@
 # Each call opens exactly one URL:
 #   - session id known (every Claude hook, Codex thread-id) →
 #     agenticnotch://agent-event?tool=&event=<session_start|prompt|waiting|stop|session_end>&session=&project=&detail=
+#     (+ &kind=<permission|idle> on waiting, from the Notification's notification_type)
 #     which feeds the "needs you" card, the finish card + history (on stop) and the
 #     live session list.
 #   - no session id (manual run, old setups) → the legacy agenticnotch://done URL;
@@ -63,8 +64,19 @@ case "$hook_event" in
   SessionEnd)       event=session_end ;;
   *)                exit 0 ;;   # a hook we don't map: stay quiet
 esac
-# auth_success is a Notification too, but nobody is waiting on the user.
-if [ "$event" = waiting ] && [ "$ntype" = auth_success ]; then exit 0; fi
+# Notification fires for real blocks and for plenty that isn't one. Tell the app which,
+# from notification_type (Claude Code 2.x always sends it); older versions without it
+# fall back to the idle reminder's text.
+wait_kind=""
+if [ "$event" = waiting ]; then
+  case "$ntype" in
+    permission_prompt|worker_permission_prompt|elicitation_dialog|elicitation_url_dialog|agent_needs_input)
+        wait_kind=permission ;;
+    idle_prompt) wait_kind=idle ;;   # ~60 s after a finished turn: nobody is blocked
+    "") case "$message" in *"waiting for your input"*) wait_kind=idle ;; *) wait_kind=permission ;; esac ;;
+    *)  exit 0 ;;                    # auth_success, agent_completed, push_notification, …
+  esac
+fi
 [ -n "$project" ] || project="$(basename "${cwd:-$PWD}")"
 
 # Derive a short summary from the hook JSON's transcript (last assistant text).
@@ -112,15 +124,18 @@ fi
 
 # Built in a single python call (UserPromptSubmit blocks the prompt while we run).
 url="$(TOOL="$tool" STATUS="$status" PROJECT="$project" TITLE="$title" EVENT="$event" \
-       SESSION="$session" MESSAGE="$message" python3 -c '
+       SESSION="$session" MESSAGE="$message" WAIT_KIND="$wait_kind" python3 -c '
 import os
 from urllib.parse import urlencode, quote
 e = os.environ
 q = lambda d: urlencode(d, quote_via=quote)
 if e["SESSION"]:
     detail = {"stop": e["TITLE"], "waiting": e["MESSAGE"]}.get(e["EVENT"], "")
-    print("agenticnotch://agent-event?" + q({"tool": e["TOOL"], "event": e["EVENT"],
-          "session": e["SESSION"], "project": e["PROJECT"], "detail": detail}))
+    params = {"tool": e["TOOL"], "event": e["EVENT"], "session": e["SESSION"],
+              "project": e["PROJECT"], "detail": detail}
+    if e["WAIT_KIND"]:
+        params["kind"] = e["WAIT_KIND"]
+    print("agenticnotch://agent-event?" + q(params))
 elif e["EVENT"] == "stop":
     print("agenticnotch://done?" + q({"tool": e["TOOL"], "status": e["STATUS"],
                                       "project": e["PROJECT"], "title": e["TITLE"]}))
