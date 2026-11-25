@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# test-agent-event — run the agenticnotch:// URL parser self-checks without
+# building or launching the app (the project has no test target, and a second
+# notch app would fight the installed one).
+# Compiles boringNotch/models/AgentEvent.swift (Foundation only) with DEBUG on
+# and runs AgentActivityInfo.runSelfCheck() + AgentEvent.runSelfCheck().
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+cat > "$tmp/main.swift" <<'SWIFT'
+AgentActivityInfo.runSelfCheck()
+AgentEvent.runSelfCheck()
+print("AgentEvent self-checks passed")
+SWIFT
+
+swiftc -D DEBUG -Onone -o "$tmp/check" "$root/boringNotch/models/AgentEvent.swift" "$tmp/main.swift"
+"$tmp/check"

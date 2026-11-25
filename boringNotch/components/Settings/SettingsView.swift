@@ -1820,8 +1820,9 @@ struct AgentsSettings: View {
         Form {
             Section {
                 Defaults.Toggle("Notify when an AI agent finishes", key: .agentNotifyEnabled)
+                Defaults.Toggle("Alert when an agent needs me", key: .agentNeedsYouEnabled)
             } footer: {
-                Text("Wire your agents with scripts/agenticnotch-notify (see README).")
+                Text("Wire your agents with scripts/agenticnotch-notify (see README). The needs-me alert comes from Claude Code's Notification hook (permission requests, waiting for input) and stays until that session moves on or you click it.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -1852,8 +1853,8 @@ struct AgentsSettings: View {
                 } else {
                     ForEach(history) { rec in
                         HStack(spacing: 8) {
-                            Image(systemName: rec.isOK ? "checkmark.circle.fill" : "xmark.octagon.fill")
-                                .foregroundStyle(rec.isOK ? .green : .red)
+                            Image(systemName: rec.statusKind.symbol)
+                                .foregroundStyle(rec.statusKind.color)
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(rec.project.isEmpty ? rec.displayTool : "\(rec.displayTool) · \(rec.project)")
                                 if !rec.titleText.isEmpty {

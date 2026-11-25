@@ -73,12 +73,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // AgenticNotch: route agenticnotch:// URLs — `done` to the agent live activity,
-    // `focus` to the Engram pomodoro mirror.
+    // `agent-event` to the per-session events, `focus` to the Engram pomodoro mirror.
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             if let info = AgentActivityInfo.from(url: url) {
                 Task { @MainActor in
                     BoringViewCoordinator.shared.showAgentActivity(info)
+                }
+            } else if let event = AgentEvent.from(url: url) {
+                Task { @MainActor in
+                    BoringViewCoordinator.shared.handleAgentEvent(event)
                 }
             } else if let focus = FocusActivityInfo.from(url: url) {
                 Task { @MainActor in
@@ -301,6 +305,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         #if DEBUG
         AgentActivityInfo.runSelfCheck()
+        AgentEvent.runSelfCheck()
         FocusActivityInfo.runSelfCheck()
         AIQuotaManager.runSelfCheck()
         #endif

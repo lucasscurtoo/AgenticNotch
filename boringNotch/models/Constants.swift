@@ -72,7 +72,7 @@ enum OptionKeyAction: String, CaseIterable, Identifiable, Defaults.Serializable 
 struct AgentActivityRecord: Codable, Defaults.Serializable, Identifiable, Equatable {
     var id: UUID = UUID()
     var tool: String
-    var status: String     // AgentStatus rawValue: "ok" / "error"
+    var status: String     // AgentStatus rawValue: "ok" / "error" / "waiting"
     var project: String
     var date: Date
     var title: String?     // optional: tolerates records saved before this field existed
@@ -85,7 +85,7 @@ struct AgentActivityRecord: Codable, Defaults.Serializable, Identifiable, Equata
         self.title = info.title.isEmpty ? nil : info.title
     }
 
-    var isOK: Bool { status == AgentStatus.ok.rawValue }
+    var statusKind: AgentStatus { AgentStatus(rawValue: status) ?? .ok }
     var displayTool: String { AgentActivityInfo.displayName(for: tool) }
     var titleText: String { title ?? "" }
 }
@@ -98,6 +98,7 @@ extension Defaults.Keys {
     static let agentAutoCollapseSeconds = Key<Double>("agentAutoCollapseSeconds", default: 4)
     static let agentDebounceSeconds = Key<Double>("agentDebounceSeconds", default: 4)
     static let agentHistory = Key<[AgentActivityRecord]>("agentHistory", default: [])
+    static let agentNeedsYouEnabled = Key<Bool>("agentNeedsYouEnabled", default: true)
 
     // MARK: General
     static let menubarIcon = Key<Bool>("menubarIcon", default: true)

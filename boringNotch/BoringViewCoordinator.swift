@@ -11,54 +11,6 @@ import Defaults
 import Security
 import SwiftUI
 
-// MARK: - Agent activity (AgenticNotch)
-
-enum AgentStatus: String {
-    case ok
-    case error
-}
-
-/// Payload decoded from an `agenticnotch://done?...` URL fired when a CLI AI
-/// agent (Claude Code, Codex, ...) finishes a turn.
-struct AgentActivityInfo: Equatable {
-    var tool: String          // "claude", "codex", ...
-    var status: AgentStatus
-    var project: String       // basename of the agent's cwd; may be ""
-    var title: String         // optional extra line; may be ""
-
-    /// Parse an `agenticnotch://done?...` URL. Returns nil for anything else.
-    static func from(url: URL) -> AgentActivityInfo? {
-        guard url.scheme == "agenticnotch", url.host == "done" else { return nil }
-        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-        func q(_ name: String) -> String { items.first(where: { $0.name == name })?.value ?? "" }
-        let tool = q("tool")
-        guard !tool.isEmpty else { return nil }
-        let status = AgentStatus(rawValue: q("status")) ?? .ok
-        return AgentActivityInfo(tool: tool, status: status, project: q("project"), title: q("title"))
-    }
-
-    static func displayName(for tool: String) -> String {
-        switch tool.lowercased() {
-        case "claude": return "Claude"
-        case "codex":  return "Codex"
-        default:       return tool.capitalized
-        }
-    }
-
-    var toolDisplayName: String { AgentActivityInfo.displayName(for: tool) }
-
-    #if DEBUG
-    static func runSelfCheck() {
-        assert(from(url: URL(string: "agenticnotch://done?tool=claude&status=error&project=gcu-api")!)
-               == AgentActivityInfo(tool: "claude", status: .error, project: "gcu-api", title: ""))
-        assert(from(url: URL(string: "agenticnotch://done?tool=codex")!)?.status == .ok)
-        assert(from(url: URL(string: "agenticnotch://done?status=ok")!) == nil)          // no tool
-        assert(from(url: URL(string: "agenticnotch://other?tool=x")!) == nil)            // wrong host
-        assert(from(url: URL(string: "https://example.com")!) == nil)                    // wrong scheme
-    }
-    #endif
-}
-
 // MARK: - Focus activity (Engram pomodoro mirror)
 
 enum FocusPhaseKind: String {
@@ -600,6 +552,51 @@ class BoringViewCoordinator: ObservableObject {
         history.insert(AgentActivityRecord(info: info, date: Date()), at: 0)
         if history.count > 10 { history = Array(history.prefix(10)) }
         Defaults[.agentHistory] = history
+    }
+
+    // MARK: - Agent session events / "needs you" (AgenticNotch)
+
+    /// Sessions blocked on the user, oldest first; the last one is on screen.
+    /// Sticky by design: no auto-collapse. A session leaves when it sends its next
+    /// prompt/stop/session_end, or when the user clicks its card.
+    @Published var needsYou: [AgentEvent] = []
+
+    func handleAgentEvent(_ event: AgentEvent) {
+        switch event.kind {
+        case .waiting:
+            recordAgentHistory(AgentActivityInfo(tool: event.tool, status: .waiting,
+                                                 project: event.project, title: event.detail))
+            guard Defaults[.agentNeedsYouEnabled] else { return }
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.74)) {
+                needsYou.removeAll { $0.session == event.session }
+                needsYou.append(event)
+                // The URL scheme is unauthenticated, so bound the stack.
+                if needsYou.count > 10 { needsYou.removeFirst() }
+            }
+            if Defaults[.agentSoundEnabled] {
+                // Its own chime, never the one picked for "finished".
+                let name = Defaults[.agentSoundName] == "Ping" ? "Tink" : "Ping"
+                NSSound(named: NSSound.Name(name))?.play()
+            }
+        case .prompt, .sessionEnd:
+            clearNeedsYou(session: event.session)
+        case .stop:
+            clearNeedsYou(session: event.session)
+            showAgentActivity(AgentActivityInfo(tool: event.tool, status: .ok,
+                                                project: event.project, title: event.detail))
+        case .sessionStart:
+            break
+        }
+    }
+
+    private func clearNeedsYou(session: String) {
+        guard needsYou.contains(where: { $0.session == session }) else { return }
+        withAnimation(.smooth) { needsYou.removeAll { $0.session == session } }
+    }
+
+    /// Click on the card: dismiss the one on screen, revealing any older one.
+    func dismissNeedsYou() {
+        withAnimation(.smooth) { _ = needsYou.popLast() }
     }
 
     // MARK: - Focus activity (Engram pomodoro mirror)
