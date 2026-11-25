@@ -921,11 +921,12 @@ struct NeedsYouView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Top row: flanks the physical notch (tool needs you | gap | waiting)
+            // Top row: flanks the physical notch (tool | gap | needs you). The flank beside the
+            // notch is narrow: "Claude needs you" there truncated to "Claude need…".
             HStack(spacing: 0) {
                 HStack(spacing: 8) {
                     AgentToolChip(tool: event.tool, accent: accent)
-                    Text("\(event.toolDisplayName) needs you")
+                    Text(event.toolDisplayName)
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(accent)
                         .lineLimit(1)
@@ -941,8 +942,8 @@ struct NeedsYouView: View {
                         .fill(accent)
                         .frame(width: 6, height: 6)
                         .opacity(pulse ? 0.25 : 1)
-                    Text("waiting")
-                        .font(.system(size: 11, weight: .medium))
+                    Text("needs you")
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(accent.opacity(0.85))
                         .lineLimit(1)
                 }
