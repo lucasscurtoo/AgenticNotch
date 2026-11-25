@@ -35,6 +35,10 @@ the notch did before: music controls, calendar, file shelf and HUD replacement.
 
 - 🔔 **Agent-finished notifications** — when Claude Code or Codex ends a turn, the notch
   pops a card with a short summary of *what it did*, the project, and an ok/error status.
+- ✋ **"Needs you" alerts** — when Claude Code is blocked on you (a permission request,
+  or idle waiting for input), the notch pops an amber card — *Claude needs you* ·
+  project · reason — with its own chime. It stays until that session moves on (you
+  answer, it stops, or it ends) or you click it. Toggle under **Settings → Agents**.
 - 🕑 **History** — the last 10 runs, in a dedicated notch tab and in Settings.
 - 📊 **AI limits tab** — how much of your Claude and Codex quota is gone and when each
   window resets. Claude comes from the usage cache Claude Code writes to `~/.claude.json`
@@ -82,19 +86,26 @@ Capabilities**, or just use the script above.
 The notch reacts when a CLI agent finishes a turn. Configure the sound and behaviour under
 **Settings → Agents**, and point your agent at the bundled script (absolute path):
 
-**Claude Code** — `~/.claude/settings.json`:
+**Claude Code** — `~/.claude/settings.json` (same command on every event; the script reads
+which hook fired from the JSON Claude Code pipes to it):
 ```json
 {
   "hooks": {
-    "Stop": [
-      { "hooks": [ { "type": "command",
-        "command": "/absolute/path/to/AgenticNotch/scripts/agenticnotch-notify --tool claude --status ok" } ] }
-    ]
+    "SessionStart":     [ { "hooks": [ { "type": "command", "command": "/absolute/path/to/AgenticNotch/scripts/agenticnotch-notify --tool claude" } ] } ],
+    "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": "/absolute/path/to/AgenticNotch/scripts/agenticnotch-notify --tool claude" } ] } ],
+    "Notification":     [ { "hooks": [ { "type": "command", "command": "/absolute/path/to/AgenticNotch/scripts/agenticnotch-notify --tool claude" } ] } ],
+    "Stop":             [ { "hooks": [ { "type": "command", "command": "/absolute/path/to/AgenticNotch/scripts/agenticnotch-notify --tool claude" } ] } ],
+    "SessionEnd":       [ { "hooks": [ { "type": "command", "command": "/absolute/path/to/AgenticNotch/scripts/agenticnotch-notify --tool claude" } ] } ]
   }
 }
 ```
-The summary is derived from the last assistant message; `project` defaults to the basename
-of the hook's working directory.
+- `Stop` → the "finished" card. The summary is derived from the last assistant message;
+  `project` is the basename of the session's working directory.
+- `Notification` → the amber "needs you" card (permission requests, idle waiting for
+  input). `UserPromptSubmit`, `Stop` and `SessionEnd` from the same session clear it.
+- Each event becomes
+  `agenticnotch://agent-event?tool=claude&event=<session_start|prompt|waiting|stop|session_end>&session=<id>&project=<name>&detail=<text>`.
+  An older setup with only the `Stop` hook keeps working.
 
 **Codex** — `~/.codex/config.toml`:
 ```toml

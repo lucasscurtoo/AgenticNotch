@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# agenticnotch-notify — poke AgenticNotch when an AI CLI agent finishes.
+# agenticnotch-notify — poke AgenticNotch when an AI CLI agent finishes or needs you.
 # Usage: agenticnotch-notify --tool claude --status ok [--project NAME] [--title TEXT]
-# If no --title is given and Stop-hook JSON arrives on stdin (Claude Code),
-# derives a short "what it did" title from the last assistant message.
+# Claude Code hook JSON on stdin (SessionStart, UserPromptSubmit, Notification,
+# Stop, SessionEnd) becomes agenticnotch://agent-event?tool=&event=&session=&project=&detail=
+# with event session_start|prompt|waiting|stop|session_end. Without hook JSON
+# (Codex `notify`, manual runs) it sends the legacy agenticnotch://done URL.
+# On Stop, or with no hook event, it derives a short "what it did" title from the
+# last assistant message unless --title is given.
 # Set AGENTICNOTCH_DEBUG=1 to print the URL instead of opening it.
 set -euo pipefail
 
@@ -13,7 +17,7 @@ if [ ! -t 0 ]; then
   IFS= read -r -d '' -t 1 hook_json <&0 || true
 fi
 
-tool=""; status="ok"; project="$(basename "$PWD")"; title=""
+tool=""; status="ok"; project=""; title=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --tool)    tool="${2:-}"; shift 2 ;;
@@ -24,8 +28,37 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# Claude Code hook fields, \x1f-separated so empty ones don't collapse.
+hook_event=""; session=""; cwd=""; message=""; ntype=""
+if [ -n "$hook_json" ]; then
+  IFS=$'\x1f' read -r hook_event session cwd message ntype < <(HOOK_JSON="$hook_json" python3 -c '
+import os, json
+try:
+    h = json.loads(os.environ.get("HOOK_JSON", ""))
+except Exception:
+    h = {}
+if not isinstance(h, dict):
+    h = {}
+f = lambda k: " ".join(str(h.get(k) or "").split())  # split() also eats \x1f
+print("\x1f".join(f(k) for k in ("hook_event_name", "session_id", "cwd", "message", "notification_type")))
+' 2>/dev/null) || true
+fi
+project="${project:-$(basename "${cwd:-$PWD}")}"
+
+case "$hook_event" in
+  "")               event="" ;;   # Codex / manual run → legacy done URL
+  SessionStart)     event="session_start" ;;
+  UserPromptSubmit) event="prompt" ;;
+  Notification)     event="waiting" ;;
+  Stop)             event="stop" ;;
+  SessionEnd)       event="session_end" ;;
+  *)                exit 0 ;;     # a hook we don't map: stay quiet
+esac
+# auth_success is a Notification too, but nobody is waiting on the user.
+if [ "$event" = "waiting" ] && [ "$ntype" = "auth_success" ]; then exit 0; fi
+
 # Derive a short summary from the hook JSON's transcript (last assistant text).
-if [ -z "$title" ] && [ -n "$hook_json" ]; then
+if [ -z "$title" ] && [ -n "$hook_json" ] && { [ -z "$event" ] || [ "$event" = "stop" ]; }; then
   title="$(HOOK_JSON="$hook_json" python3 -c '
 import os, json
 raw = os.environ.get("HOOK_JSON", "")
@@ -68,7 +101,13 @@ print(out)
 fi
 
 enc() { python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "${1:-}"; }
-url="agenticnotch://done?tool=$(enc "$tool")&status=$(enc "$status")&project=$(enc "$project")&title=$(enc "$title")"
+if [ -n "$event" ]; then
+  detail="$title"
+  [ "$event" = "waiting" ] && detail="$message"
+  url="agenticnotch://agent-event?tool=$(enc "$tool")&event=$event&session=$(enc "$session")&project=$(enc "$project")&detail=$(enc "$detail")"
+else
+  url="agenticnotch://done?tool=$(enc "$tool")&status=$(enc "$status")&project=$(enc "$project")&title=$(enc "$title")"
+fi
 
 if [ "${AGENTICNOTCH_DEBUG:-}" = "1" ]; then
   echo "$url"
